@@ -206,6 +206,7 @@ void shm_mbuffer_get(shm_mbuffer_t *shm_mbuf, void *data, size_t size)
 void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 {
 	void * ret = NULL;
+	assert(shm_mbuf != NULL);
 
 	sem_wait(&(*shm_mbuf).Wsem);
 
@@ -216,13 +217,15 @@ void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
 	*key = tkey;	
-	
+	assert(tkey < 64);
 	return ret;
 }
 
 void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 {
 	void * ret = NULL;
+	assert(shm_mbuf != NULL);
+	
 	if(sem_trywait(&(*shm_mbuf).Wsem) != 0)
 		return NULL;
 
@@ -231,15 +234,18 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 		(*shm_mbuf).Wfield ^= (1 << tkey);
 	unlock(&(*shm_mbuf).Wlock);
 
-	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
+	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+(uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
 	*key = tkey;	
-
+	assert(tkey < 64);
 	return ret;
 }
 
 
 void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
+	assert(shm_mbuf != NULL);
+	assert(key < 64);
+
 	lock(&(*shm_mbuf).Rlock);
 		(*shm_mbuf).Rfield |= (1 << key);
 	unlock(&(*shm_mbuf).Rlock);
@@ -248,6 +254,9 @@ void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 
 void shm_mbuffer_discard_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
+	assert(shm_mbuf != NULL);
+	assert(key < 64);
+
 	lock(&(*shm_mbuf).Wlock);
 		(*shm_mbuf).Wfield |= (1 << key);
 	unlock(&(*shm_mbuf).Wlock);
@@ -257,6 +266,7 @@ void shm_mbuffer_discard_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 {
 	void * ret = NULL;
+	assert(shm_mbuf != NULL);
 
 	sem_wait(&(*shm_mbuf).Rsem);
 
@@ -273,6 +283,9 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 void shm_mbuffer_put_read(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
+	assert(shm_mbuf != NULL);
+	assert(key < 64);
+
 	lock(&(*shm_mbuf).Wlock);
 		(*shm_mbuf).Wfield |= (1 << key);
 	unlock(&(*shm_mbuf).Wlock);

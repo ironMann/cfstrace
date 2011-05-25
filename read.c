@@ -22,9 +22,26 @@
 #include "shm_cbuffer.h"
 #include "shm_mbuffer.h"
 
+#include <signal.h>
+
+void (*signal(int signum, void (*sighandler)(int)))(int);
+
 
 unsigned long long cycleCount() {
   asm ("rdtsc");
+}
+
+void handler(int sig) {
+  void *array[10];
+  size_t size;
+
+  // get void*'s for all entries on the stack
+  size = backtrace(array, 10);
+
+  // print out all the frames to stderr
+  fprintf(stderr, "Error: signal %d:\n", sig);
+  backtrace_symbols_fd(array, size, 2);
+  exit(1);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,7 +63,7 @@ inline uint64_t timestamp()
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
-	return tv.tv_usec + 1000000*tv.tv_sec;
+	return (uint64_t)tv.tv_usec + 1000000ULL*(uint64_t)tv.tv_sec;
 }
 
 inline void fill_name_header(opname_t *op, enum op_type op_type)
@@ -73,6 +90,9 @@ volatile int init_profile_lib()
 	if(init)
 		return init;
 	in_init = 1;
+	
+	signal(SIGSEGV, handler); 
+
 
 	if(i = shm_mbuffer_open(&fd_data_storage, "/cfsprof_fd") < 0) {
 		printf("shm failed: %d\n", i);
