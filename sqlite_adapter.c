@@ -50,7 +50,7 @@ sqlite_adapter_t* open_database(const char *db_file_name)
 	sqlite3_exec((*db).db, create_write, NULL, NULL, NULL);
 
 	sqlite3_exec((*db).db, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
-	sqlite3_exec((*db).db, "PRAGMA journal_mode = MEMORY", NULL, NULL, NULL);
+	sqlite3_exec((*db).db, "PRAGMA journal_mode = OFF", NULL, NULL, NULL);
 	
 	strncpy((*db).db_name, db_file_name, 1023); (*db).db_name[1023]=0;
 
@@ -153,7 +153,7 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_int  (stmt, 3, (*operation).pid);
 			sqlite3_bind_int  (stmt, 4, (*operation).tid);
 			sqlite3_bind_int64(stmt, 5, (*operation).duration);
-			sqlite3_bind_text (stmt, 6, (*operation).data.open_data.name, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text (stmt, 6, (*operation).name, -1, SQLITE_TRANSIENT);
 			sqlite3_bind_int  (stmt, 7, (*operation).data.open_data.flags);
 			sqlite3_bind_int  (stmt, 8, (*operation).data.open_data.mode);
 			sqlite3_bind_int  (stmt, 9, (*operation).data.open_data.ret);

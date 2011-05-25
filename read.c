@@ -215,7 +215,8 @@ int open64(const char *pathname, int flags, ...)
 	(*operation).duration = timestamp() - (*operation).timestamp;
 	
 	(*operation).data.open_data.flags = flags;
-	strncpy((*operation).data.open_data.name, pathname, MAX_PATH_SIZE_TRACE-1); //abs path!
+	strncpy((*operation).name, pathname, MAX_PATH_SIZE_TRACE); 
+	(*operation).name[MAX_PATH_SIZE_TRACE-1] = 0;  //abs path!
 	(*operation).data.open_data.ret = ret;
 	(*operation).err = errno;
 	

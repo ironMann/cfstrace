@@ -25,19 +25,16 @@
 
 inline unsigned int getffsl(uint64_t x)
 {
-//	if(sizeof(uint64_t) == sizeof(unsigned long)) {
-//		return __builtin_ffsl(x);
-//	}else {
-		union data {
-			uint64_t u64;
-			unsigned long l32[2];
-		} d;
-		d.u64 = x;
-		int ret;
-		if(ret = __builtin_ffsl(d.l32[0]) != 0)
-			return ret;
-		return __builtin_ffsl(d.l32[1]);
-//	}
+	union data {
+		uint64_t u64;
+		unsigned long l32[2];
+	} d;
+
+	d.u64 = x;
+	int ret;
+	if(ret = ffsl(d.l32[0]) != 0)
+		return ret;
+	return ffsl(d.l32[1])+32;
 }
 
 inline static size_t _align(const size_t size)
@@ -201,8 +198,8 @@ void shm_mbuffer_get(shm_mbuffer_t *shm_mbuf, void *data, size_t size)
 	unlock(&(*shm_mbuf).lock);
 	sem_post(&(*shm_mbuf).free);
 }
-
 #endif
+
 void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 {
 	void * ret = NULL;
@@ -275,8 +272,9 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 		(*shm_mbuf).Rfield ^= (1 << tkey);
 	unlock(&(*shm_mbuf).Rlock);
 
-	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
-	*key = tkey;	
+	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+ (uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
+	*key = tkey;
+	assert(tkey < 64);
 	
 	return ret;
 }
@@ -294,9 +292,8 @@ void shm_mbuffer_put_read(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 
 void shm_mbuff_put_read_zmq(void* data, void* hint)
 {
-	shm_mbuffer_t *shm_mbuf = (shm_mbuffer_t *)hint;
-	mbuffer_key_t key = (data - (((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem)) / (*shm_mbuf).size;
-	
+	shm_mbuffer_t *shm_mbuf = (shm_mbuffer_t *) hint;
+	mbuffer_key_t key = ((uintptr_t)data - (((uintptr_t)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem)) / (uintptr_t)(*shm_mbuf).size;
 	shm_mbuffer_put_read(shm_mbuf, key);
 }
 
