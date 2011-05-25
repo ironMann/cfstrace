@@ -25,9 +25,9 @@
 
 inline unsigned int getffsl(uint64_t x)
 {
-	if(sizeof(uint64_t) == sizeof(unsigned long)) {
-		return __builtin_ffsl(x);
-	}else {
+//	if(sizeof(uint64_t) == sizeof(unsigned long)) {
+//		return __builtin_ffsl(x);
+//	}else {
 		union data {
 			uint64_t u64;
 			unsigned long l32[2];
@@ -37,7 +37,7 @@ inline unsigned int getffsl(uint64_t x)
 		if(ret = __builtin_ffsl(d.l32[0]) != 0)
 			return ret;
 		return __builtin_ffsl(d.l32[1]);
-	}
+//	}
 }
 
 inline static size_t _align(const size_t size)
