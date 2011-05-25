@@ -5,6 +5,7 @@
 #include <errno.h>
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h> /* For O_* constants */
 #include <unistd.h>
@@ -21,12 +22,12 @@
 #define ALIGN_ON 16
 
 
-inline static _align(const size_t size)
+inline size_t _align(const size_t size)
 {
 	return ((size+ALIGN_ON-1)/ALIGN_ON)*ALIGN_ON;
 }
 
-inline static _align_on(const size_t size, const size_t align)
+inline size_t _align_on(const size_t size, const size_t align)
 {
 	return ((size+align-1)/align)*align;
 }
