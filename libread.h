@@ -43,26 +43,44 @@ struct close_op {
 	int ret;
 };
 
-typedef struct ops {
+typedef struct opfd {
+	enum op_type operation;
+
 	uint64_t timestamp;
 	//char     hostname[128];
 	pid_t    pid;
 	pid_t    tid;
 
-	enum op_type operation;
-
 	union {
 		struct read_op  read_data;
 		struct write_op write_data;
-		struct open_op  open_data;
-		struct creat_op creat_data;
 		struct close_op close_data;
 	} data;
 	
 	uint64_t duration;
 	int err;
 
-}  __attribute__ ((aligned (16))) ops_t;
+}  __attribute__ ((aligned (16))) opfd_t;
+
+
+typedef struct opname{
+	enum op_type operation;
+
+	uint64_t timestamp;
+	//char     hostname[128];
+	pid_t    pid;
+	pid_t    tid;
+
+	union {
+		struct open_op  open_data;
+		struct creat_op creat_data;
+	} data;
+	
+	uint64_t duration;
+	int err;
+
+}  __attribute__ ((aligned (16))) opname_t;
+
 
 #endif // _LIBREAD_H
 

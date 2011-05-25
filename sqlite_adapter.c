@@ -75,13 +75,17 @@ void close_database(sqlite_adapter_t *adapter)
 	free (adapter);
 }
 
-void insert_data(sqlite_adapter_t *adapter, const char *hostname, ops_t *operation)
+void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 {
 	sqlite3 *db = (*adapter).db;
 	sqlite3_stmt *stmt = NULL;
 	
-	switch((*operation).operation) {
-		case READ:				
+	enum op_type *type = (enum op_type *)data;
+
+	switch(*type) {
+		case READ:
+		{
+			opfd_t *operation = data;
 			//fprintf(stderr,"[%d:%d] read: %d, %d : %d | duration: %d\n", 
 			//	(*operation).pid, (*operation).tid,
 			//	(*operation).data.read_data.fd,
@@ -103,9 +107,11 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, ops_t *operati
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
-			
+		}	
 			break;
 		case WRITE:
+		{		
+			opfd_t *operation = data;
 			//fprintf(stderr,"[%d:%d] write: %d, %d : %d | duration: %d\n", 
 			//	(*operation).pid, (*operation).tid,
 			//	(*operation).data.write_data.fd,
@@ -128,8 +134,11 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, ops_t *operati
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
+		}
 			break;
 		case OPEN:
+		{
+			opname_t *operation = data;
 			//fprintf(stderr,"[%d:%d] open: %s, %d : %d | duration: %d\n", 
 			//	(*operation).pid, (*operation).tid,
 			//	(*operation).data.open_data.name,
@@ -153,9 +162,11 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, ops_t *operati
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
-
+		}
 			break;
 		case CLOSE:
+		{		
+			opfd_t *operation = data;
 			//fprintf(stderr,"[%d:%d] close: %d : %d | duration: %d\n", 
 			//	(*operation).pid, (*operation).tid,
 			//	(*operation).data.close_data.fd,
@@ -176,8 +187,10 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, ops_t *operati
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
+		}
 			break;
 		default:
+			printf("This shouldn't not happen! Msg type %d\n", (int)*type);
 			break;
 	};
 }

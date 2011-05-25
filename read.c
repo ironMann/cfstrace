@@ -20,6 +20,7 @@
 
 #include "libread.h"
 #include "shm_cbuffer.h"
+#include "shm_mbuffer.h"
 
 
 unsigned long long cycleCount() {
@@ -28,7 +29,8 @@ unsigned long long cycleCount() {
 
 ////////////////////////////////////////////////////////////////////////////////
 int init = 0, in_init = 0;
-shm_cbuffer_t *data_storage;
+shm_mbuffer_t *fd_data_storage;
+shm_mbuffer_t *name_data_storage;
 
 void teardown_profile_lib()
 {
@@ -37,7 +39,8 @@ void teardown_profile_lib()
 	fflush(NULL);
 	//sleep(2);
 	//zmq_term(msg_context);
-	shm_cbuffer_close(data_storage);
+	shm_mbuffer_close(fd_data_storage);
+	shm_mbuffer_close(name_data_storage);
 }
 inline uint64_t timestamp()
 {
@@ -46,7 +49,15 @@ inline uint64_t timestamp()
 	return tv.tv_usec + 1000000*tv.tv_sec;
 }
 
-inline void fill_header(ops_t *op, enum op_type op_type)
+inline void fill_name_header(opname_t *op, enum op_type op_type)
+{	
+	(*op).operation = op_type;
+	(*op).pid = getpid();
+	(*op).tid = syscall(SYS_gettid); //gettid();
+	(*op).timestamp = timestamp();
+}
+
+inline void fill_fd_header(opfd_t *op, enum op_type op_type)
 {	
 	(*op).operation = op_type;
 	(*op).pid = getpid();
@@ -63,9 +74,13 @@ volatile int init_profile_lib()
 		return init;
 	in_init = 1;
 
-	if(i = shm_cbuffer_open(&data_storage, "/fsprof") < 0) {
-	
-		printf("shm failed: %d\n", shm_cbuffer_open(&data_storage, "/fsprof"));
+	if(i = shm_mbuffer_open(&fd_data_storage, "/cfsprof_fd") < 0) {
+		printf("shm failed: %d\n", i);
+		return init;
+	}
+
+	if(i = shm_mbuffer_open(&name_data_storage, "/cfsprof_name") < 0) {
+		printf("shm failed: %d\n", i);
 		return init;
 	}
 
@@ -83,24 +98,31 @@ ssize_t read(int fd, void *buf, size_t count)
 	if(!do_real_read) {
 		do_real_read = dlsym(RTLD_NEXT, "read");
 	}
-	
-	struct ops operation;
-	fill_header(&operation, READ);
-	
-	ssize_t ret = do_real_read(fd, buf, count);
+
 	if(fd < 3) // do not log stdio
-		return ret;
-
-	operation.duration = timestamp() - operation.timestamp;	
-
+		return do_real_read(fd, buf, count);
+	
+	mbuffer_key_t wkey;
+	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
-		operation.data.read_data.fd = fd;
-		operation.data.read_data.count = count;
-		operation.data.read_data.ret = ret;
-		operation.err = errno;
+		operation = (opfd_t *) shm_mbuffer_tryget_write(fd_data_storage, &wkey);
+		if(operation == NULL) //full buffer!!!
+			return do_real_read(fd, buf, count);
+	}else
+		return do_real_read(fd, buf, count);
+	
+	fill_fd_header(operation, READ);
 
-		shm_cbuffer_tryput(data_storage, &operation, sizeof(struct ops));
-	}
+	ssize_t ret = do_real_read(fd, buf, count);
+	
+	(*operation).duration = timestamp() - (*operation).timestamp;	
+	(*operation).data.read_data.fd = fd;
+	(*operation).data.read_data.count = count;
+	(*operation).data.read_data.ret = ret;
+	(*operation).err = errno;
+
+	shm_mbuffer_put_write(fd_data_storage, wkey);
+
 	return ret;
 }
 
@@ -111,23 +133,32 @@ ssize_t write(int fd, const void *buf, size_t count)
 		do_real_write = dlsym(RTLD_NEXT, "write");
 	}
 	
-	struct ops operation;
-	fill_header(&operation, WRITE);
-	
-	ssize_t ret = do_real_write(fd, buf, count);
 	if(fd < 3) // do not log stdio
-		return ret;
-	
-	operation.duration = timestamp() - operation.timestamp;
-	
+		return do_real_write(fd, buf, count);
+
+	mbuffer_key_t wkey;
+	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
-		operation.data.write_data.fd = fd;
-		operation.data.write_data.count = count;
-		operation.data.write_data.ret = ret;
-		operation.err = errno;
-		
-		shm_cbuffer_tryput(data_storage, &operation, sizeof(struct ops));
-	}
+		operation = (opfd_t *)shm_mbuffer_tryget_write(fd_data_storage, &wkey);
+		if(operation == NULL) //full buffer!!!
+			return do_real_write(fd, buf, count);
+	} else
+		return do_real_write(fd, buf, count);
+
+	fill_fd_header(operation, WRITE);
+
+	ssize_t ret = do_real_write(fd, buf, count);
+
+	(*operation).duration = timestamp() - (*operation).timestamp;
+
+
+	(*operation).data.write_data.fd = fd;
+	(*operation).data.write_data.count = count;
+	(*operation).data.write_data.ret = ret;
+	(*operation).err = errno;
+	
+	shm_mbuffer_put_write(fd_data_storage, wkey);
+
 	return ret;
 }
 
@@ -140,8 +171,6 @@ int open64(const char *pathname, int flags, ...)
 	}
 	int mode = 0;
 
-	struct ops operation;
-	fill_header(&operation, OPEN);
 	if(flags & O_CREAT)
 	{
 		va_list arg;
@@ -150,18 +179,28 @@ int open64(const char *pathname, int flags, ...)
 		va_end(arg);
 	}
 
+	mbuffer_key_t wkey;
+	opname_t *operation;
+	if(!in_init && init_profile_lib()) {
+		operation = (opname_t *)shm_mbuffer_tryget_write(name_data_storage, &wkey);
+		if(operation == NULL) //full buffer!!!
+			return do_real_open(pathname, flags, mode);
+	} else
+		return do_real_open(pathname, flags, mode);
+
+	fill_name_header(operation, OPEN);
+	
 	int ret = do_real_open(pathname, flags, mode);
 	
-	operation.duration = timestamp() - operation.timestamp;
+	(*operation).duration = timestamp() - (*operation).timestamp;
 	
-	if(!in_init && init_profile_lib()) {
-		operation.data.open_data.flags = flags;
-		strncpy(operation.data.open_data.name, pathname, MAX_PATH_SIZE_TRACE-1); //abs path!
-		operation.data.open_data.ret = ret;
-		operation.err = errno;
-		
-		shm_cbuffer_tryput(data_storage, &operation, sizeof(struct ops));
-	}
+	(*operation).data.open_data.flags = flags;
+	strncpy((*operation).data.open_data.name, pathname, MAX_PATH_SIZE_TRACE-1); //abs path!
+	(*operation).data.open_data.ret = ret;
+	(*operation).err = errno;
+	
+	shm_mbuffer_put_write(name_data_storage, wkey);
+
 	return ret;
 }
 
@@ -185,26 +224,33 @@ int close(int fd)
 		do_real_close = dlsym(RTLD_NEXT, "close");
 	}
 
-	struct ops operation;
-	fill_header(&operation, CLOSE);
+	if(fd<3) // strange !?
+		return do_real_close(fd);
+	
+	mbuffer_key_t wkey;
+	opfd_t *operation;
+	if(!in_init && init_profile_lib()) {
+		operation = (opfd_t *)shm_mbuffer_tryget_write(fd_data_storage, &wkey);
+		if(operation == NULL) //full buffer!
+			return do_real_close(fd);
+	} else
+		return do_real_close(fd);
+
+	fill_fd_header(operation, CLOSE);
 	
 	int ret = do_real_close(fd);
-	if(fd<3) // strange !!!
-		return ret;
-
-	operation.duration = timestamp() - operation.timestamp;
 	
-	if((in_init==0) && init_profile_lib()) {
-		operation.data.close_data.fd = fd;
-		operation.data.close_data.ret = ret;
-		operation.err = errno;
-		
-		shm_cbuffer_tryput(data_storage, &operation, sizeof(struct ops));
-	}
+	(*operation).duration = timestamp() - (*operation).timestamp;
+	
+	
+	(*operation).data.close_data.fd = fd;
+	(*operation).data.close_data.ret = ret;
+	(*operation).err = errno;
+	
+	shm_mbuffer_put_write(fd_data_storage, wkey);
+	
 	return ret;
 }
-
-
 
 
 // gcc -fPIC -shared -Wl,-soname,libread.so -ldl -o libread.so  read.c

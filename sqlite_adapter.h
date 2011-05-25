@@ -20,7 +20,7 @@ typedef struct sqlite_adapter {
 
 sqlite_adapter_t* open_database(const char *db_file_name);
 void              close_database(sqlite_adapter_t *adapter);
-void              insert_data(sqlite_adapter_t *adapter, const char *hostname, ops_t *operation);
+void              insert_data(sqlite_adapter_t *adapter, const char *hostname, void *operation);
 
 
 #endif
