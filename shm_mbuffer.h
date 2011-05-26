@@ -5,17 +5,17 @@
 
 #define MBUFFER_MAX_NAME 128
 
-typedef unsigned int mbuffer_key_t;
+typedef ssize_t mbuffer_key_t;
 
 typedef struct {	
-	uint64_t Rfield;
-	uint64_t Wfield;
+	int Rfield;
+	int Wfield;
 	void *mem;
 	size_t size;
 	size_t count;
 	//locks
-	pthread_spinlock_t Rlock;
-	pthread_spinlock_t Wlock;
+	pthread_mutex_t Rlock;
+	pthread_mutex_t Wlock;
 	sem_t Rsem;
 	sem_t Wsem;
 

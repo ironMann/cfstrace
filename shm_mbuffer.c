@@ -15,26 +15,53 @@
 
 #include "shm_mbuffer.h"
 
-#define init_lock(l) do { pthread_spin_init(l, PTHREAD_PROCESS_SHARED); } while(0)
-#define lock(l)      do { pthread_spin_lock(l); } while(0)
-#define unlock(l)    do { pthread_spin_unlock(l); } while(0)
+//#define init_lock(l) do { pthread_spin_init(l, PTHREAD_PROCESS_SHARED); } while(0)
+//#define lock(l)      do { pthread_spin_lock(l); } while(0)
+//#define unlock(l)    do { pthread_spin_unlock(l); } while(0)
+
+#define init_lock(l) do { sharedMemoryMutexInit(l); } while(0)
+#define lock(l)      do { pthread_mutex_lock(l); } while(0)
+#define unlock(l)    do { pthread_mutex_unlock(l); } while(0)
 
 #define ALIGN_ON 16
 
-//#define getffsl(x) __builtin_ffsl((x))
-
-inline unsigned int getffsl(uint64_t x)
+void printX(uint64_t x)
 {
-	union data {
-		uint64_t u64;
-		unsigned long l32[2];
-	} d;
+	printf("%016llX\n", x);
+}
 
-	d.u64 = x;
-	int ret;
-	if(ret = ffsl(d.l32[0]) != 0)
-		return ret;
-	return ffsl(d.l32[1])+32;
+static void sharedMemoryMutexInit(pthread_mutex_t * GlobalMutex)
+{
+	pthread_mutexattr_t oMutexAttribute;
+	pthread_mutexattr_init(&oMutexAttribute);
+	if(0 == pthread_mutexattr_setrobust_np(&oMutexAttribute, PTHREAD_MUTEX_ROBUST_NP)) {
+		if(0 == pthread_mutexattr_setpshared(&oMutexAttribute, PTHREAD_PROCESS_SHARED)) {
+			if(0 == pthread_mutexattr_settype(&oMutexAttribute, PTHREAD_MUTEX_ERRORCHECK)) {
+				if(0 == pthread_mutex_init(GlobalMutex, &oMutexAttribute)) {
+					//printf("GlobalMutex initialized.\n");
+				}
+				else {
+					printf("pthread_mutex_init Failure.\n");
+				}
+			}
+			else {
+				printf("pthread_mutexattr_settype Failure.\n");
+			}
+		}
+		else {
+			printf("pthread_mutexattr_setpshared Failure.\n");
+		}
+	}
+	else {
+		printf("pthread_mutexattr_setrobust_np Failure.\n");
+	}
+	
+	pthread_mutexattr_destroy(&oMutexAttribute);
+}
+
+inline unsigned int getffsl(int x)
+{
+	return ffs(x);
 }
 
 inline static size_t _align(const size_t size)
@@ -49,7 +76,7 @@ inline static size_t _align_on(const size_t size, const size_t align)
 
 int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t obj_size, /*const*/ size_t count)
 {
-	count = 64; //for now
+	count = sizeof(int)*8; //for now
 	assert( 0 < obj_size );
 	assert( 0 < count );
 
@@ -89,8 +116,8 @@ int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t 
 	sem_init(&(**shm_mbuf).Rsem, 1, 0);
 	(**shm_mbuf).fd = mem;
 	(**shm_mbuf).fsize = total_aligned_size;
-	(**shm_mbuf).Rfield = 0x0000000000000000ULL;
-	(**shm_mbuf).Wfield = 0xFFFFFFFFFFFFFFFFULL;
+	(**shm_mbuf).Rfield = 0x0;
+	(**shm_mbuf).Wfield = ~0x0;
 	strncpy((**shm_mbuf).name, name, MBUFFER_MAX_NAME-1);
 
 	return 0;
@@ -209,7 +236,7 @@ void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 	lock(&(*shm_mbuf).Wlock);
 		mbuffer_key_t tkey = getffsl((*shm_mbuf).Wfield) - 1;
-		(*shm_mbuf).Wfield ^= (1 << tkey);
+		(*shm_mbuf).Wfield ^= ((int)1 << (int)tkey);
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
@@ -223,12 +250,14 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	void * ret = NULL;
 	assert(shm_mbuf != NULL);
 	
-	if(sem_trywait(&(*shm_mbuf).Wsem) != 0)
+	if(sem_trywait(&(*shm_mbuf).Wsem) != 0) {
+		*key = -1;
 		return NULL;
+	}
 
 	lock(&(*shm_mbuf).Wlock);
 		mbuffer_key_t tkey = getffsl((*shm_mbuf).Wfield) - 1;
-		(*shm_mbuf).Wfield ^= (1 << tkey);
+		(*shm_mbuf).Wfield ^= ((int)1 << (int)tkey);
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+(uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
@@ -244,7 +273,7 @@ void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 	assert(key < 64);
 
 	lock(&(*shm_mbuf).Rlock);
-		(*shm_mbuf).Rfield |= (1 << key);
+		(*shm_mbuf).Rfield |= ((int)1 << (int)key);
 	unlock(&(*shm_mbuf).Rlock);
 	sem_post(&(*shm_mbuf).Rsem);
 }
@@ -255,7 +284,7 @@ void shm_mbuffer_discard_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 	assert(key < 64);
 
 	lock(&(*shm_mbuf).Wlock);
-		(*shm_mbuf).Wfield |= (1 << key);
+		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
 	unlock(&(*shm_mbuf).Wlock);
 	sem_post(&(*shm_mbuf).Wsem);
 }
@@ -269,7 +298,7 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 	lock(&(*shm_mbuf).Rlock);
 		mbuffer_key_t tkey = getffsl((*shm_mbuf).Rfield) - 1;
-		(*shm_mbuf).Rfield ^= (1 << tkey);
+		(*shm_mbuf).Rfield ^= ((int)1 << (int)tkey);
 	unlock(&(*shm_mbuf).Rlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+ (uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
@@ -285,7 +314,7 @@ void shm_mbuffer_put_read(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 	assert(key < 64);
 
 	lock(&(*shm_mbuf).Wlock);
-		(*shm_mbuf).Wfield |= (1 << key);
+		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
 	unlock(&(*shm_mbuf).Wlock);
 	sem_post(&(*shm_mbuf).Wsem);
 }
@@ -298,3 +327,26 @@ void shm_mbuff_put_read_zmq(void* data, void* hint)
 }
 
 
+#if 0
+int main()
+{
+	shm_mbuffer_t *bb;
+	printf("start\n");
+	int i; uint64_t a;
+	for(i=0; i<64; i++) {
+		a = ((uint64_t)1 << i);
+		printX(a);
+		printX(getffsl(a));
+	}
+
+	
+	shm_mbuffer_create(&bb, "/test", sizeof(int), 444);
+	mbuffer_key_t k;
+	do {
+		void * addr = shm_mbuffer_get_write(bb, &k);
+		printf("addr %X, key %d\n", addr, k);
+	}
+	while(k>=0);
+	return 0;
+}
+#endif
