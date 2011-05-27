@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <assert.h>
 #include <errno.h>
 
@@ -241,7 +242,7 @@ void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
 	*key = tkey;	
-	assert(tkey < 64);
+	assert(tkey < sizeof(int)*8);
 	return ret;
 }
 
@@ -262,7 +263,7 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+(uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
 	*key = tkey;	
-	assert(tkey < 64);
+	assert(tkey < sizeof(int)*8);
 	return ret;
 }
 
@@ -270,7 +271,7 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
 	assert(shm_mbuf != NULL);
-	assert(key < 64);
+	assert(key < sizeof(int)*8);
 
 	lock(&(*shm_mbuf).Rlock);
 		(*shm_mbuf).Rfield |= ((int)1 << (int)key);
@@ -281,7 +282,7 @@ void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 void shm_mbuffer_discard_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
 	assert(shm_mbuf != NULL);
-	assert(key < 64);
+	assert(key < sizeof(int)*8);
 
 	lock(&(*shm_mbuf).Wlock);
 		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
@@ -303,7 +304,7 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+ (uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
 	*key = tkey;
-	assert(tkey < 64);
+	assert(tkey < sizeof(int)*8);
 	
 	return ret;
 }
@@ -311,7 +312,7 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 void shm_mbuffer_put_read(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
 	assert(shm_mbuf != NULL);
-	assert(key < 64);
+	assert(key < sizeof(int)*8);
 
 	lock(&(*shm_mbuf).Wlock);
 		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
@@ -323,6 +324,8 @@ void shm_mbuff_put_read_zmq(void* data, void* hint)
 {
 	shm_mbuffer_t *shm_mbuf = (shm_mbuffer_t *) hint;
 	mbuffer_key_t key = ((uintptr_t)data - (((uintptr_t)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem)) / (uintptr_t)(*shm_mbuf).size;
+
+	//printf("%d ", key);
 	shm_mbuffer_put_read(shm_mbuf, key);
 }
 

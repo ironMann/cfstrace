@@ -10,17 +10,21 @@
 
 #include <zmq.h>
 
-#include "libread.h"
+#include "cfstrace.h"
 #include "shm_mbuffer.h"
 
 static void *context = NULL;
 static shm_mbuffer_t *fd_data_storage = NULL;
 static shm_mbuffer_t *name_data_storage = NULL;
 
+static char cstr[2048];
+
+
 void * fd_worker(void *p)
 {
 	void *sender_s = zmq_socket(context, ZMQ_PUSH);
-	zmq_connect(sender_s, "tcp://localhost:2307");
+
+	zmq_connect(sender_s, cstr);
 
 	while(1) {
 		zmq_msg_t msg;
@@ -40,7 +44,8 @@ void * fd_worker(void *p)
 void * name_worker(void *p)
 {
 	void *sender_s = zmq_socket(context, ZMQ_PUSH);
-	zmq_connect(sender_s, "tcp://localhost:2307");
+	
+	zmq_connect(sender_s, cstr);
 	
 	while(1) {
 		zmq_msg_t msg;
@@ -51,7 +56,7 @@ void * name_worker(void *p)
 		size_t real_size = (uintptr_t)(*operation).name - (uintptr_t)operation;
 		real_size += strlen((*operation).name) + 1;
 		
-		zmq_msg_init_data(&msg, operation, /*sizeof(opname_t)*/ real_size, shm_mbuff_put_read_zmq, name_data_storage);
+		zmq_msg_init_data(&msg, operation, real_size, shm_mbuff_put_read_zmq, name_data_storage);
 
 		zmq_send(sender_s, &msg, ZMQ_NOBLOCK);
 
@@ -61,9 +66,18 @@ void * name_worker(void *p)
 }
 
 
-int main( )
+int main(int c, char **p)
 {
 	context = zmq_init(8);
+	
+	if(c == 1)
+		sprintf(cstr, "tcp://%s:%d", "localhost", 2307);
+	else if(c == 3)
+		sprintf(cstr, "tcp://%s:%s", p[1],p[2]);
+	else {
+		printf("check your inputs\n collect host port\n");
+		return 0;
+	}
 
 	if(shm_mbuffer_create(&fd_data_storage, "/cfsprof_fd", sizeof(opfd_t), 2048) != 0) {
 		return -1;

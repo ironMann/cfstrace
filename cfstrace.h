@@ -53,7 +53,7 @@ typedef struct opfd {
 		struct close_op close_data;
 	} data;
 
-}  __attribute__ ((aligned (16))) opfd_t;
+}  __attribute__ ((aligned (1))) opfd_t;
 
 
 typedef struct opname{
@@ -72,7 +72,7 @@ typedef struct opname{
 	
 	char   name[MAX_PATH_SIZE_TRACE];
 
-}  __attribute__ ((aligned (16))) opname_t;
+}  __attribute__ ((aligned (1))) opname_t;
 
 
 #endif // _LIBREAD_H

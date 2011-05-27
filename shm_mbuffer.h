@@ -1,9 +1,11 @@
 #ifndef _SHM_MBUFFER_H
 #define _SHM_MBUFFER_H
 
-#include <stdint.h>
-
 #define MBUFFER_MAX_NAME 128
+
+// dangerous!!!
+#define MBUFFER_READ_TIMEOUT_MSEC 10000
+#define MBUFFER_WRITE_TIMEOUT_MSEC 10000
 
 typedef ssize_t mbuffer_key_t;
 
@@ -23,6 +25,12 @@ typedef struct {
 	size_t fsize;	
 	
 	char name[MBUFFER_MAX_NAME];
+
+	pthread_t thousekeep;
+	int wpid[sizeof(int)*8];
+	int rpid[sizeof(int)*8];
+	unsigned long long wstart[sizeof(int)*8];
+
 } __attribute__ ((aligned (16))) shm_mbuffer_t;
 
 

@@ -1,0 +1,7 @@
+collect.o: collect.c libread.h shm_mbuffer.h
+receiver.o: receiver.c libread.h sqlite_adapter.h sqlite3.h
+shm_cbuffer.o: shm_cbuffer.c shm_cbuffer.h
+shm_mbuffer.o: shm_mbuffer.c shm_mbuffer.h
+sqlite3.o: sqlite3.c
+sqlite_adapter.o: sqlite_adapter.c sqlite3.h libread.h sqlite_adapter.h
+trace.o: trace.c libread.h shm_cbuffer.h shm_mbuffer.h

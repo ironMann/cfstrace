@@ -18,7 +18,7 @@
 
 #include <zmq.h>
 
-#include "libread.h"
+#include "cfstrace.h"
 #include "shm_cbuffer.h"
 #include "shm_mbuffer.h"
 
@@ -91,7 +91,7 @@ volatile int init_profile_lib()
 		return init;
 	in_init = 1;
 	
-	signal(SIGSEGV, handler); 
+	//signal(SIGSEGV, handler); 
 
 
 	if(i = shm_mbuffer_open(&fd_data_storage, "/cfsprof_fd") < 0) {
@@ -125,7 +125,7 @@ ssize_t read(int fd, void *buf, size_t count)
 	mbuffer_key_t wkey;
 	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
-		operation = (opfd_t *) shm_mbuffer_tryget_write(fd_data_storage, &wkey);
+		operation = (opfd_t *) shm_mbuffer_get_write(fd_data_storage, &wkey);
 		if(operation == NULL) //full buffer!!!
 			return do_real_read(fd, buf, count);
 	}else
@@ -159,7 +159,7 @@ ssize_t write(int fd, const void *buf, size_t count)
 	mbuffer_key_t wkey;
 	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
-		operation = (opfd_t *)shm_mbuffer_tryget_write(fd_data_storage, &wkey);
+		operation = (opfd_t *)shm_mbuffer_get_write(fd_data_storage, &wkey);
 		if(operation == NULL) //full buffer!!!
 			return do_real_write(fd, buf, count);
 	} else
@@ -202,7 +202,7 @@ int open64(const char *pathname, int flags, ...)
 	mbuffer_key_t wkey;
 	opname_t *operation;
 	if(!in_init && init_profile_lib()) {
-		operation = (opname_t *)shm_mbuffer_tryget_write(name_data_storage, &wkey);
+		operation = (opname_t *)shm_mbuffer_get_write(name_data_storage, &wkey);
 		if(operation == NULL) //full buffer!!!
 			return do_real_open(pathname, flags, mode);
 	} else
@@ -251,7 +251,7 @@ int close(int fd)
 	mbuffer_key_t wkey;
 	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
-		operation = (opfd_t *)shm_mbuffer_tryget_write(fd_data_storage, &wkey);
+		operation = (opfd_t *)shm_mbuffer_get_write(fd_data_storage, &wkey);
 		if(operation == NULL) //full buffer!
 			return do_real_close(fd);
 	} else

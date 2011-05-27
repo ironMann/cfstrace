@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "sqlite3.h"
-#include "libread.h"
+#include "cfstrace.h"
 #include "sqlite_adapter.h"
 
 #define create_open "CREATE TABLE IF NOT EXISTS open_table ( hostname TEXT NOT NULL, timestamp INTEGER NOT NULL, pid INTEGER NOT NULL, tid INTEGER NOT NULL, duration INTEGER NOT NULL, name TEXT, flags INTEGER, mode INTEGER DEFAULT (0), ret INTEGER, errno INTEGER DEFAULT (0))"
@@ -86,12 +86,12 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 		case READ:
 		{
 			opfd_t *operation = data;
-			//fprintf(stderr,"[%d:%d] read: %d, %d : %d | duration: %d\n", 
-			//	(*operation).pid, (*operation).tid,
-			//	(*operation).data.read_data.fd,
-			//	(*operation).data.read_data.count,
-			//	(*operation).data.read_data.ret,
-			//	(*operation).duration);
+			/*fprintf(stderr,"[%d:%d] read: %d, %d : %d | duration: %d\n", 
+				(*operation).pid, (*operation).tid,
+				(*operation).data.read_data.fd,
+				(*operation).data.read_data.count,
+				(*operation).data.read_data.ret,
+				(*operation).duration);*/
 			stmt = (*adapter).read_insert_stmt;
 			//(@host, @time, @pid, @tid, @duration, @fd, @count, @ret, @errno)
 			sqlite3_bind_text (stmt, 1, hostname, -1, SQLITE_TRANSIENT);
@@ -112,12 +112,12 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 		case WRITE:
 		{		
 			opfd_t *operation = data;
-			//fprintf(stderr,"[%d:%d] write: %d, %d : %d | duration: %d\n", 
-			//	(*operation).pid, (*operation).tid,
-			//	(*operation).data.write_data.fd,
-			//	(*operation).data.write_data.count,
-			//	(*operation).data.write_data.ret,
-			//	(*operation).duration);
+			/*fprintf(stderr,"[%d:%d] write: %d, %d : %d | duration: %d\n", 
+				(*operation).pid, (*operation).tid,
+				(*operation).data.write_data.fd,
+				(*operation).data.write_data.count,
+				(*operation).data.write_data.ret,
+				(*operation).duration);*/
 
 			stmt = (*adapter).write_insert_stmt;
 			//(@host, @time, @pid, @tid, @duration, @fd, @count, @ret, @errno)
@@ -139,12 +139,12 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 		case OPEN:
 		{
 			opname_t *operation = data;
-			//fprintf(stderr,"[%d:%d] open: %s, %d : %d | duration: %d\n", 
-			//	(*operation).pid, (*operation).tid,
-			//	(*operation).data.open_data.name,
-			//	(*operation).data.open_data.flags,
-			//	(*operation).data.open_data.ret,
-			//	(*operation).duration);
+			/*fprintf(stderr,"[%d:%d] open: %s, %d : %d | duration: %d\n", 
+				(*operation).pid, (*operation).tid,
+				(*operation).name,
+				(*operation).data.open_data.flags,
+				(*operation).data.open_data.ret,
+				(*operation).duration);*/
 
 			stmt = (*adapter).open_insert_stmt;
 			//@host, @time, @pid, @tid, @duration, @name, @flags, @mode, @ret, @errno
@@ -167,11 +167,11 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 		case CLOSE:
 		{		
 			opfd_t *operation = data;
-			//fprintf(stderr,"[%d:%d] close: %d : %d | duration: %d\n", 
-			//	(*operation).pid, (*operation).tid,
-			//	(*operation).data.close_data.fd,
-			//	(*operation).data.close_data.ret,
-			//	(*operation).duration);
+			/*fprintf(stderr,"[%d:%d] close: %d : %d | duration: %d\n", 
+				(*operation).pid, (*operation).tid,
+				(*operation).data.close_data.fd,
+				(*operation).data.close_data.ret,
+				(*operation).duration);*/
 
 			stmt = (*adapter).close_insert_stmt;
 			//(@host, @time, @pid, @tid, @duration, @fd, @ret, @errno)
