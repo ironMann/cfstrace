@@ -3,6 +3,7 @@ obj/*.d
 libcfstrace.so
 receiver
 collector
+depend_all.d
 
 # Compiled source #
 ###################
