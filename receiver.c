@@ -9,7 +9,7 @@
 
 int main( )
 {
-	void *context = zmq_init(4);
+	void *context = zmq_init(8);
 
 	void *receiver_s = zmq_socket(context, ZMQ_PULL);
 	zmq_bind(receiver_s, "tcp://*:2307");

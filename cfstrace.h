@@ -11,6 +11,8 @@ enum op_type {
 		OPEN,
 		CREAT,
 		CLOSE,
+		PROC_START,
+		PROC_CLOSE,
 		UNDEFINED };
 
 
@@ -37,15 +39,19 @@ struct close_op {
 	int ret;
 };
 
-typedef struct opfd {
+typedef struct op_header {
 	enum op_type operation;
 
 	uint64_t timestamp;
 	pid_t    pid;
 	pid_t    tid;
-		
+
 	uint64_t duration;
 	int err;
+}  __attribute__ ((aligned (16)))  op_header_t;
+
+typedef struct opfd {
+	op_header_t header;
 
 	union {
 		struct read_op  read_data;
@@ -53,18 +59,11 @@ typedef struct opfd {
 		struct close_op close_data;
 	} data;
 
-}  __attribute__ ((aligned (1))) opfd_t;
+}  __attribute__ ((aligned (16))) opfd_t;
 
 
 typedef struct opname{
-	enum op_type operation;
-
-	uint64_t timestamp;
-	pid_t    pid;
-	pid_t    tid;
-
-	uint64_t duration;
-	int err;
+	op_header_t header;
 
 	union {
 		struct open_op  open_data;

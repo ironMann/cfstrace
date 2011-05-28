@@ -12,9 +12,12 @@ typedef struct sqlite_adapter {
 	sqlite3_stmt *close_insert_stmt;
 	sqlite3_stmt *read_insert_stmt;
 	sqlite3_stmt *write_insert_stmt;
+	sqlite3_stmt *proc_start_insert_stmt;
+	sqlite3_stmt *proc_end_insert_stmt;
 
 	//transaction thread ?!
 	pthread_t tthread;
+	pthread_mutex_t sql_mutex;
 	int should_commit;
 } sqlite_adapter_t;
 

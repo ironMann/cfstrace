@@ -26,6 +26,71 @@
 
 #define ALIGN_ON 16
 
+// dangerous!!!
+#define MBUFFER_READ_TIMEOUT_MSEC  (uint64_t)60000
+#define MBUFFER_WRITE_TIMEOUT_MSEC (uint64_t)30000
+#define MBUFFER_STALE_CHECK_SEC              1
+
+static inline uint64_t timestamp()
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return (uint64_t)tv.tv_usec + (uint64_t)1000000 * (uint64_t)tv.tv_sec;
+}
+
+void* stale_op_checker(void *data)
+{
+	shm_mbuffer_t *self = (shm_mbuffer_t*)data;
+	int i;
+
+	sleep(MBUFFER_STALE_CHECK_SEC);
+	
+	while(1) {
+		const uint64_t ctime = timestamp();
+	
+		lock(&(*self).Wlock);
+		lock(&(*self).Rlock);
+
+		for(i=0; i<sizeof(int)*8; i++) {
+			if(((*self).wstart[i] !=0) && ((ctime - (*self).wstart[i]) > MBUFFER_WRITE_TIMEOUT_MSEC*1000)) {
+				(*self).Wfield |= ((int)1 << (int)i);
+				(*self).Rfield &= ~((int)1 << (int)i);
+				(*self).rstart[i] = 0;
+				(*self).wstart[i] = 0;
+				sem_post(&(*self).Wsem);
+				
+				printf("Write stale detected!!! key: %d\n", i);
+			}
+		}
+
+		for(i=0; i<sizeof(int)*8; i++) {
+			if(((*self).rstart[i] !=0) && ((ctime - (*self).rstart[i]) > MBUFFER_READ_TIMEOUT_MSEC*1000)) {
+				(*self).Wfield |= ((int)1 << (int)i);
+				(*self).Rfield &= ~((int)1 << (int)i);
+				(*self).rstart[i] = 0;
+				(*self).wstart[i] = 0;
+				sem_post(&(*self).Wsem);
+				
+				printf("Read stale detected!!! key: %d\n", i);
+			}
+		}
+
+		int semval;
+		sem_getvalue(&(*self).Wsem, &semval);
+		if(semval > sizeof(int)*8)
+			printf("********ERROR: Wsem on %s has value: %d\n", (*self).name, semval);
+		
+		unlock(&(*self).Rlock);
+		unlock(&(*self).Wlock);
+
+		sleep(MBUFFER_STALE_CHECK_SEC);
+	};
+
+	pthread_exit(NULL);
+	return NULL;
+}
+
+
 void printX(uint64_t x)
 {
 	printf("%016llX\n", x);
@@ -120,6 +185,8 @@ int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t 
 	(**shm_mbuf).Rfield = 0x0;
 	(**shm_mbuf).Wfield = ~0x0;
 	strncpy((**shm_mbuf).name, name, MBUFFER_MAX_NAME-1);
+
+	pthread_create(&(**shm_mbuf).thousekeep, NULL, stale_op_checker, *shm_mbuf);
 
 	return 0;
 }
@@ -238,6 +305,7 @@ void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	lock(&(*shm_mbuf).Wlock);
 		mbuffer_key_t tkey = getffsl((*shm_mbuf).Wfield) - 1;
 		(*shm_mbuf).Wfield ^= ((int)1 << (int)tkey);
+		(*shm_mbuf).wstart[tkey] = timestamp();
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
@@ -259,6 +327,7 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	lock(&(*shm_mbuf).Wlock);
 		mbuffer_key_t tkey = getffsl((*shm_mbuf).Wfield) - 1;
 		(*shm_mbuf).Wfield ^= ((int)1 << (int)tkey);
+		(*shm_mbuf).wstart[tkey] = timestamp();
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+(uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
@@ -274,7 +343,12 @@ void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 	assert(key < sizeof(int)*8);
 
 	lock(&(*shm_mbuf).Rlock);
+		if((*shm_mbuf).wstart[key] == 0) { // not enoguh to detect stale write?!
+			unlock(&(*shm_mbuf).Rlock);
+			return;
+		}
 		(*shm_mbuf).Rfield |= ((int)1 << (int)key);
+		(*shm_mbuf).wstart[key] = 0;
 	unlock(&(*shm_mbuf).Rlock);
 	sem_post(&(*shm_mbuf).Rsem);
 }
@@ -285,7 +359,12 @@ void shm_mbuffer_discard_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 	assert(key < sizeof(int)*8);
 
 	lock(&(*shm_mbuf).Wlock);
+		if((*shm_mbuf).wstart[key] == 0) { // not enoguh to detect stale write?!
+			unlock(&(*shm_mbuf).Wlock);
+			return;
+		}
 		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
+		(*shm_mbuf).wstart[key] = 0;
 	unlock(&(*shm_mbuf).Wlock);
 	sem_post(&(*shm_mbuf).Wsem);
 }
@@ -300,6 +379,7 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	lock(&(*shm_mbuf).Rlock);
 		mbuffer_key_t tkey = getffsl((*shm_mbuf).Rfield) - 1;
 		(*shm_mbuf).Rfield ^= ((int)1 << (int)tkey);
+		(*shm_mbuf).rstart[tkey] = timestamp();
 	unlock(&(*shm_mbuf).Rlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+ (uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
@@ -315,7 +395,12 @@ void shm_mbuffer_put_read(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 	assert(key < sizeof(int)*8);
 
 	lock(&(*shm_mbuf).Wlock);
+		if((*shm_mbuf).rstart[key] == 0) { // not enoguh to detect stale read?!
+			unlock(&(*shm_mbuf).Wlock);
+			return;
+		}
 		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
+		(*shm_mbuf).rstart[key] = 0;
 	unlock(&(*shm_mbuf).Wlock);
 	sem_post(&(*shm_mbuf).Wsem);
 }
@@ -324,8 +409,6 @@ void shm_mbuff_put_read_zmq(void* data, void* hint)
 {
 	shm_mbuffer_t *shm_mbuf = (shm_mbuffer_t *) hint;
 	mbuffer_key_t key = ((uintptr_t)data - (((uintptr_t)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem)) / (uintptr_t)(*shm_mbuf).size;
-
-	//printf("%d ", key);
 	shm_mbuffer_put_read(shm_mbuf, key);
 }
 
@@ -347,9 +430,15 @@ int main()
 	mbuffer_key_t k;
 	do {
 		void * addr = shm_mbuffer_get_write(bb, &k);
+
+		shm_mbuffer_put_write(bb, k);
+
+		addr = shm_mbuffer_get_read(bb, &k);
+
 		printf("addr %X, key %d\n", addr, k);
 	}
-	while(k>=0);
+	while(1);
 	return 0;
 }
 #endif
+

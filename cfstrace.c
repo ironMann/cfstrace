@@ -44,6 +44,23 @@ void handler(int sig) {
   exit(1);
 }
 
+
+static inline uint64_t timestamp()
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return (uint64_t)tv.tv_usec + (uint64_t)1000000 * (uint64_t)tv.tv_sec;
+}
+
+inline void fill_header(op_header_t *op, enum op_type op_type)
+{	
+	(*op).operation = op_type;
+	(*op).pid = getpid();
+	(*op).tid = syscall(SYS_gettid); //gettid();
+	(*op).timestamp = timestamp();
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 int init = 0, in_init = 0;
 shm_mbuffer_t *fd_data_storage;
@@ -51,39 +68,87 @@ shm_mbuffer_t *name_data_storage;
 
 void teardown_profile_lib()
 {
-	//terminate = 1;
-	//printf("Bye, bye!\n");
-	fflush(NULL);
+	// put proc end message
+	mbuffer_key_t wkey;
+	opfd_t *operation = (opfd_t *)shm_mbuffer_get_write(fd_data_storage, &wkey);
+	fill_header(&(*operation).header, PROC_CLOSE);	
+	shm_mbuffer_put_write(fd_data_storage, wkey);
+
 	//sleep(2);
-	//zmq_term(msg_context);
 	shm_mbuffer_close(fd_data_storage);
 	shm_mbuffer_close(name_data_storage);
 }
-inline uint64_t timestamp()
+
+int read_abspath(int fd, char *dst, unsigned int size)
 {
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return (uint64_t)tv.tv_usec + 1000000ULL*(uint64_t)tv.tv_sec;
+	char name[32];
+	ssize_t ret;
+	dst[0] = '\0';
+	snprintf(name, sizeof name, "/proc/self/fd/%d", fd);
+
+	if((ret=readlink(name, dst, size)) <= 0) {
+		dst[0] = '\0';
+		return 0;
+	}
+
+	if((ret>0) && (dst[0]!='/')) {
+		dst[0] = '\0';
+		return 0;
+	}
+
+	dst[ret] = '\0';
+	return ret;
+}
+int read_cmdline(char *dst, unsigned int size)
+{
+	char name[32];
+	int fd;
+	unsigned n = 0;
+	unsigned int pid = getpid();
+	dst[0] = '\0';
+	snprintf(name, sizeof name, "/proc/self/cmdline");
+	fd = open(name, O_RDONLY);
+	if(fd==-1) 
+		return 0;
+	for(;;){
+		ssize_t r = read(fd,dst+n,size-n);
+		if(r==-1){
+			if(errno==EINTR) 
+				continue;
+			break;
+		}
+		n += r;
+		if(n>=size) 
+			break; // filled the buffer
+		if(r==0) 
+			break;  // EOF
+	}
+	close(fd);
+	if(n){
+		int i;
+		if(n>=size) 
+			n = size-1;
+		dst[n] = '\0';
+		i=0;
+		while(i<=n){
+			int c = dst[i];
+			if(c<' ' || c>'~') {
+				dst[i]= ' ';
+				c = ' ';
+			}
+
+			if((c==' ') || (c == '\0')) {
+				dst[i]='\0';
+				break;
+			}
+			i++;
+		}
+		return i;
+	}
+	return n;
 }
 
-inline void fill_name_header(opname_t *op, enum op_type op_type)
-{	
-	(*op).operation = op_type;
-	(*op).pid = getpid();
-	(*op).tid = syscall(SYS_gettid); //gettid();
-	(*op).timestamp = timestamp();
-}
-
-inline void fill_fd_header(opfd_t *op, enum op_type op_type)
-{	
-	(*op).operation = op_type;
-	(*op).pid = getpid();
-	(*op).tid = syscall(SYS_gettid); //gettid();
-	(*op).timestamp = timestamp();
-}
-
-
-volatile int init_profile_lib()
+int init_profile_lib()
 {
 	int i;
 	
@@ -104,13 +169,20 @@ volatile int init_profile_lib()
 		return init;
 	}
 
-	assert (i%16 == 0);
+	//insert procstart message
+	mbuffer_key_t wkey;
+	opname_t *operation = (opname_t *)shm_mbuffer_get_write(name_data_storage, &wkey);
+	
+	fill_header(&(*operation).header, PROC_START);
+	read_cmdline((*operation).name, MAX_PATH_SIZE_TRACE);
+	(*operation).name[MAX_PATH_SIZE_TRACE-1] = 0;
+	
+	shm_mbuffer_put_write(name_data_storage, wkey);
 
 	atexit(teardown_profile_lib);
 	init = 1; in_init = 0;
 	return init;
 }
-
 
 ssize_t read(int fd, void *buf, size_t count)
 {
@@ -122,24 +194,28 @@ ssize_t read(int fd, void *buf, size_t count)
 	if(fd < 3) // do not log stdio
 		return do_real_read(fd, buf, count);
 	
+	op_header_t header;
+		
+	fill_header(&header, READ);
+
+	ssize_t ret = do_real_read(fd, buf, count);
+	
 	mbuffer_key_t wkey;
 	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
 		operation = (opfd_t *) shm_mbuffer_get_write(fd_data_storage, &wkey);
 		if(operation == NULL) //full buffer!!!
-			return do_real_read(fd, buf, count);
+			return ret;
 	}else
-		return do_real_read(fd, buf, count);
+		return ret;
 	
-	fill_fd_header(operation, READ);
-
-	ssize_t ret = do_real_read(fd, buf, count);
+	memcpy(operation, &header, sizeof(op_header_t));
 	
-	(*operation).duration = timestamp() - (*operation).timestamp;	
+	(*operation).header.duration = timestamp() - (*operation).header.timestamp;	
 	(*operation).data.read_data.fd = fd;
 	(*operation).data.read_data.count = count;
 	(*operation).data.read_data.ret = ret;
-	(*operation).err = errno;
+	(*operation).header.err = errno;
 
 	shm_mbuffer_put_write(fd_data_storage, wkey);
 
@@ -156,26 +232,27 @@ ssize_t write(int fd, const void *buf, size_t count)
 	if(fd < 3) // do not log stdio
 		return do_real_write(fd, buf, count);
 
+	op_header_t header;
+
+	fill_header(&header, WRITE);
+
+	ssize_t ret = do_real_write(fd, buf, count);
+
 	mbuffer_key_t wkey;
 	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
 		operation = (opfd_t *)shm_mbuffer_get_write(fd_data_storage, &wkey);
 		if(operation == NULL) //full buffer!!!
-			return do_real_write(fd, buf, count);
+			return ret;
 	} else
-		return do_real_write(fd, buf, count);
+		return ret;
 
-	fill_fd_header(operation, WRITE);
-
-	ssize_t ret = do_real_write(fd, buf, count);
-
-	(*operation).duration = timestamp() - (*operation).timestamp;
-
-
+	memcpy(operation, &header, sizeof(op_header_t));
+	(*operation).header.duration = timestamp() - (*operation).header.timestamp;
 	(*operation).data.write_data.fd = fd;
 	(*operation).data.write_data.count = count;
 	(*operation).data.write_data.ret = ret;
-	(*operation).err = errno;
+	(*operation).header.err = errno;
 	
 	shm_mbuffer_put_write(fd_data_storage, wkey);
 
@@ -199,28 +276,31 @@ int open64(const char *pathname, int flags, ...)
 		va_end(arg);
 	}
 
+	op_header_t header;
+	fill_header(&header, OPEN);
+	
+	int ret = do_real_open(pathname, flags, mode);
+	
 	mbuffer_key_t wkey;
 	opname_t *operation;
 	if(!in_init && init_profile_lib()) {
 		operation = (opname_t *)shm_mbuffer_get_write(name_data_storage, &wkey);
 		if(operation == NULL) //full buffer!!!
-			return do_real_open(pathname, flags, mode);
+			return ret;
 	} else
-		return do_real_open(pathname, flags, mode);
+		return ret;
 
-	fill_name_header(operation, OPEN);
-	
-	int ret = do_real_open(pathname, flags, mode);
-	
-	(*operation).duration = timestamp() - (*operation).timestamp;
+	memcpy(operation, &header, sizeof(op_header_t));
+	(*operation).header.duration = timestamp() - (*operation).header.timestamp;
 	
 	(*operation).data.open_data.flags = flags;
-	strncpy((*operation).name, pathname, MAX_PATH_SIZE_TRACE); 
-	(*operation).name[MAX_PATH_SIZE_TRACE-1] = 0;  //abs path!
 	(*operation).data.open_data.ret = ret;
-	(*operation).err = errno;
+	(*operation).header.err = errno;
 	
-	shm_mbuffer_put_write(name_data_storage, wkey);
+	if(read_abspath(ret, (*operation).name, MAX_PATH_SIZE_TRACE) <= 0)
+		shm_mbuffer_discard_write(name_data_storage, wkey);
+	else 
+		shm_mbuffer_put_write(name_data_storage, wkey);
 
 	return ret;
 }
@@ -248,28 +328,28 @@ int close(int fd)
 	if(fd<3) // strange !?
 		return do_real_close(fd);
 	
+	op_header_t header;
+	fill_header(&header, CLOSE);
+	
+	int ret = do_real_close(fd);
+	
 	mbuffer_key_t wkey;
 	opfd_t *operation;
 	if(!in_init && init_profile_lib()) {
 		operation = (opfd_t *)shm_mbuffer_get_write(fd_data_storage, &wkey);
 		if(operation == NULL) //full buffer!
-			return do_real_close(fd);
+			return ret;
 	} else
-		return do_real_close(fd);
-
-	fill_fd_header(operation, CLOSE);
+		return ret;
 	
-	int ret = do_real_close(fd);
-	
-	(*operation).duration = timestamp() - (*operation).timestamp;
-	
-	
+	memcpy(operation, &header, sizeof(op_header_t));
+	(*operation).header.duration = timestamp() - (*operation).header.timestamp;
 	(*operation).data.close_data.fd = fd;
 	(*operation).data.close_data.ret = ret;
-	(*operation).err = errno;
-	
+	(*operation).header.err = errno;
+
 	shm_mbuffer_put_write(fd_data_storage, wkey);
-	
+
 	return ret;
 }
 
