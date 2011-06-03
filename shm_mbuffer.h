@@ -5,7 +5,7 @@
 
 typedef ssize_t mbuffer_key_t;
 
-typedef struct {	
+typedef struct {
 	int Rfield;
 	int Wfield;
 	void *mem;
@@ -18,8 +18,8 @@ typedef struct {
 	sem_t Wsem;
 
 	int fd;
-	size_t fsize;	
-	
+	size_t fsize;
+
 	char name[MBUFFER_MAX_NAME];
 
 	pthread_t thousekeep;

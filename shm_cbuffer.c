@@ -85,7 +85,7 @@ int shm_cbuffer_create(shm_cbuffer_t **shm_cbuf, const char *name, const size_t 
 int shm_cbuffer_open(shm_cbuffer_t **shm_cbuf, const char *name)
 {
 	assert (strlen(name) > 1);
-	
+
 	// open shm
 	int mem = shm_open(name, O_RDWR, S_IRUSR|S_IWUSR);
 	if(mem == -1)
@@ -96,9 +96,9 @@ int shm_cbuffer_open(shm_cbuffer_t **shm_cbuf, const char *name)
    	if (fstat(mem, &file_stat) == -1) {
 		shm_unlink(name);
 		return -2;
-	}	
+	}
     	size_t total_size = file_stat.st_size;
-	
+
 	// map shm to addr space
 	*shm_cbuf = (shm_cbuffer_t*) mmap(0, total_size, PROT_READ|PROT_WRITE, MAP_SHARED, mem, 0);
 	if(*shm_cbuf == MAP_FAILED) {
@@ -112,7 +112,7 @@ int shm_cbuffer_open(shm_cbuffer_t **shm_cbuf, const char *name)
 		shm_unlink(name);
 		return -4;
 	}
-	
+
 	return (int)(**shm_cbuf).size;
 }
 
@@ -121,9 +121,9 @@ void shm_cbuffer_destroy(shm_cbuffer_t *shm_cbuf)
 	char name[CBUFFER_MAX_NAME];
 	int fd = (*shm_cbuf).fd;
 	size_t fsize = (*shm_cbuf).fsize;
-	
+
 	memcpy(name, (*shm_cbuf).name, CBUFFER_MAX_NAME);
-	
+
 	munmap(shm_cbuf, fsize);
 	shm_unlink(name);
 }
@@ -133,35 +133,35 @@ void shm_cbuffer_close(shm_cbuffer_t *shm_cbuf)
 	char name[CBUFFER_MAX_NAME];
 	int fd = (*shm_cbuf).fd;
 	size_t fsize = (*shm_cbuf).fsize;
-	
+
 	memcpy(name, (*shm_cbuf).name, CBUFFER_MAX_NAME);
-	
+
 	munmap(shm_cbuf, fsize);
 }
 
 void shm_cbuffer_put(shm_cbuffer_t *shm_cbuf, const void *data, size_t size)
 {
-	int pos;	
+	int pos;
 	sem_wait(&(*shm_cbuf).free);
 	lock(&(*shm_cbuf).lock);
 	pos = (*shm_cbuf).h;
 	(*shm_cbuf).h = ((*shm_cbuf).h+1) % (*shm_cbuf).count;
 
 	memcpy(((void*)shm_cbuf)+(size_t)(*shm_cbuf).mem+pos*(*shm_cbuf).size, data, size<(*shm_cbuf).size?size:(*shm_cbuf).size);
-	
+
 	unlock(&(*shm_cbuf).lock);
 	sem_post(&(*shm_cbuf).used);
 }
 
 int shm_cbuffer_tryput(shm_cbuffer_t *shm_cbuf, const void *data, size_t size)
 {
-	int pos;	
+	int pos;
 	if(sem_trywait(&(*shm_cbuf).free) != 0)
 		return -1;
 	lock(&(*shm_cbuf).lock);
 	pos = (*shm_cbuf).h;
 	(*shm_cbuf).h = ((*shm_cbuf).h+1) % (*shm_cbuf).count;
-	
+
 	memcpy(((void*)shm_cbuf)+(size_t)(*shm_cbuf).mem+pos*(*shm_cbuf).size, data, size<(*shm_cbuf).size?size:(*shm_cbuf).size);
 
 	unlock(&(*shm_cbuf).lock);
@@ -171,15 +171,15 @@ int shm_cbuffer_tryput(shm_cbuffer_t *shm_cbuf, const void *data, size_t size)
 
 void shm_cbuffer_get(shm_cbuffer_t *shm_cbuf, void *data, size_t size)
 {
-	int pos;	
+	int pos;
 	sem_wait(&(*shm_cbuf).used);
-	
+
 	lock(&(*shm_cbuf).lock);
 	pos = (*shm_cbuf).t;
 	(*shm_cbuf).t = ((*shm_cbuf).t+1) % (*shm_cbuf).count;
-	
+
 	memcpy(data, ((void*)shm_cbuf) + (size_t)(*shm_cbuf).mem+pos*(*shm_cbuf).size, size<(*shm_cbuf).size?size:(*shm_cbuf).size);
-	
+
 	unlock(&(*shm_cbuf).lock);
 	sem_post(&(*shm_cbuf).free);
 }
@@ -195,9 +195,9 @@ int main()
 
 	printf("sizeof shm_cbuffer_t : %d\n", sizeof(shm_cbuffer_t));
 	printf("object size : %d\n", shm_cbuffer_open(&buf, "/test"));
-	
+
 	shm_cbuffer_destroy(buf);
-	
+
 	return 0;
 }
 #endif

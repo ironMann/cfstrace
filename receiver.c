@@ -16,7 +16,7 @@ int main( )
 	sqlite_adapter_t *db;
 
 	//printf("received packet\n");
-	db = open_database("trace.db");
+	db = sqlite_open_database("trace.db");
 	if(!db)
 		return -1;
 
@@ -29,13 +29,13 @@ int main( )
 			return -1;
 		}
 		//printf("received packet\n");
-		
+
 		struct ops * operation = zmq_msg_data(&msg);
-		insert_data(db, "vm-machine", operation);
-		
+		sqlite_insert_data(db, "vm-machine", operation);
+
 		zmq_msg_close(&msg);
 	}
 
-	close_database(db);
+	sqlite_close_database(db);
 	return 0;
 }

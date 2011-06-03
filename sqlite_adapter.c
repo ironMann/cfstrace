@@ -29,27 +29,27 @@ void* transaction_thread(void *sqldb)
 {
 	sqlite_adapter_t* db = (sqlite_adapter_t*)sqldb;
 	sqlite3 *ldb = (sqlite3 *) (*db).db;
-	
+
 	while(1) {
 		pthread_mutex_lock(&(*db).sql_mutex);
 		sqlite3_exec(ldb, "BEGIN TRANSACTION", NULL, NULL, NULL);
 		pthread_mutex_unlock(&(*db).sql_mutex);
-		
+
 		sleep(5);
 		pthread_mutex_lock(&(*db).sql_mutex);
-		sqlite3_exec(ldb, "END TRANSACTION", NULL, NULL, NULL);		
+		sqlite3_exec(ldb, "END TRANSACTION", NULL, NULL, NULL);
 		pthread_mutex_unlock(&(*db).sql_mutex);
 	};
 	pthread_exit(NULL);
 }
 
 
-sqlite_adapter_t* open_database(const char *db_file_name)
+sqlite_adapter_t* sqlite_open_database(const char *db_file_name)
 {
-	sqlite_adapter_t *db = malloc(sizeof(sqlite_adapter_t));	
+	sqlite_adapter_t *db = malloc(sizeof(sqlite_adapter_t));
 
 	sqlite3_open(db_file_name, &((*db).db));
-	
+
 	//temp test
 	sqlite3_exec((*db).db, "DROP TABLE open_table", NULL, NULL, NULL);
 	sqlite3_exec((*db).db, "DROP TABLE close_table", NULL, NULL, NULL);
@@ -57,7 +57,7 @@ sqlite_adapter_t* open_database(const char *db_file_name)
 	sqlite3_exec((*db).db, "DROP TABLE write_table", NULL, NULL, NULL);
 	sqlite3_exec((*db).db, "DROP TABLE proc_start_table", NULL, NULL, NULL);
 	sqlite3_exec((*db).db, "DROP TABLE proc_end_table", NULL, NULL, NULL);
-	
+
 
 	sqlite3_exec((*db).db, create_open, NULL, NULL, NULL);
 	sqlite3_exec((*db).db, create_close, NULL, NULL, NULL);
@@ -68,8 +68,11 @@ sqlite_adapter_t* open_database(const char *db_file_name)
 
 
 	sqlite3_exec((*db).db, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
-	sqlite3_exec((*db).db, "PRAGMA journal_mode = OFF", NULL, NULL, NULL);
-	
+	sqlite3_exec((*db).db, "PRAGMA journal_mode = MEMORY", NULL, NULL, NULL);
+	sqlite3_exec((*db).db, "PRAGMA page_size = 4096", NULL, NULL, NULL);
+	sqlite3_exec((*db).db, "PRAGMA cache_size = 4096", NULL, NULL, NULL);
+	sqlite3_exec((*db).db, "PRAGMA encoding = \"UTF-8\"", NULL, NULL, NULL);
+
 	strncpy((*db).db_name, db_file_name, 1023); (*db).db_name[1023]=0;
 
 	//prepare statements
@@ -87,7 +90,7 @@ sqlite_adapter_t* open_database(const char *db_file_name)
 }
 
 
-void close_database(sqlite_adapter_t *adapter)
+void sqlite_close_database(sqlite_adapter_t *adapter)
 {
 	if(!adapter)
 		return;
@@ -96,18 +99,18 @@ void close_database(sqlite_adapter_t *adapter)
 	free (adapter);
 }
 
-void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
+void sqlite_insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 {
 	sqlite3 *db = (*adapter).db;
 	sqlite3_stmt *stmt = NULL;
-	
+
 	enum op_type *type = (enum op_type *)data;
 	pthread_mutex_lock(&(*adapter).sql_mutex);
 	switch(*type) {
 		case READ:
 		{
 			opfd_t *operation = data;
-			/*fprintf(stderr,"[%d:%d] read: %d, %d : %d | duration: %d\n", 
+			/*fprintf(stderr,"[%d:%d] read: %d, %d : %d | duration: %d\n",
 				(*operation).pid, (*operation).tid,
 				(*operation).data.read_data.fd,
 				(*operation).data.read_data.count,
@@ -124,16 +127,16 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_int  (stmt, 7, (*operation).data.read_data.count);
 			sqlite3_bind_int  (stmt, 8, (*operation).data.read_data.ret);
 			sqlite3_bind_int  (stmt, 9, (*operation).header.err);
-			
+
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
-		}	
+		}
 			break;
 		case WRITE:
-		{		
+		{
 			opfd_t *operation = data;
-			/*fprintf(stderr,"[%d:%d] write: %d, %d : %d | duration: %d\n", 
+			/*fprintf(stderr,"[%d:%d] write: %d, %d : %d | duration: %d\n",
 				(*operation).pid, (*operation).tid,
 				(*operation).data.write_data.fd,
 				(*operation).data.write_data.count,
@@ -151,7 +154,7 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_int  (stmt, 7, (*operation).data.write_data.count);
 			sqlite3_bind_int  (stmt, 8, (*operation).data.write_data.ret);
 			sqlite3_bind_int  (stmt, 9, (*operation).header.err);
-			
+
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
@@ -160,7 +163,7 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 		case OPEN:
 		{
 			opname_t *operation = data;
-			/*fprintf(stderr,"[%d:%d] open: %s, %d : %d | duration: %d\n", 
+			/*fprintf(stderr,"[%d:%d] open: %s, %d : %d | duration: %d\n",
 				(*operation).pid, (*operation).tid,
 				(*operation).name,
 				(*operation).data.open_data.flags,
@@ -179,14 +182,14 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_int  (stmt, 8, (*operation).data.open_data.mode);
 			sqlite3_bind_int  (stmt, 9, (*operation).data.open_data.ret);
 			sqlite3_bind_int  (stmt, 10, (*operation).header.err);
-			
+
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
 		}
 			break;
 		case CLOSE:
-		{		
+		{
 			opfd_t *operation = data;
 
 			stmt = (*adapter).close_insert_stmt;
@@ -199,7 +202,7 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_int  (stmt, 6, (*operation).data.close_data.fd);
 			sqlite3_bind_int  (stmt, 7, (*operation).data.close_data.ret);
 			sqlite3_bind_int  (stmt, 8, (*operation).header.err);
-			
+
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
@@ -215,7 +218,7 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_int64(stmt, 2, (*operation).header.timestamp);
 			sqlite3_bind_int  (stmt, 3, (*operation).header.pid);
 			sqlite3_bind_text (stmt, 4, (*operation).name, -1, SQLITE_TRANSIENT);
-			
+
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);
@@ -230,7 +233,7 @@ void insert_data(sqlite_adapter_t *adapter, const char *hostname, void *data)
 			sqlite3_bind_text (stmt, 1, hostname, -1, SQLITE_TRANSIENT);
 			sqlite3_bind_int64(stmt, 2, (*operation).header.timestamp);
 			sqlite3_bind_int  (stmt, 3, (*operation).header.pid);
-			
+
 			sqlite3_step(stmt);
 			sqlite3_clear_bindings(stmt);
 			sqlite3_reset(stmt);

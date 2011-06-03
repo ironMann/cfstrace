@@ -68,7 +68,7 @@ typedef struct opname{
 	union {
 		struct open_op  open_data;
 	} data;
-	
+
 	char   name[MAX_PATH_SIZE_TRACE];
 
 }  __attribute__ ((aligned (1))) opname_t;

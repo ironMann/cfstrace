@@ -8,14 +8,14 @@ typedef struct {
 	size_t size;
 	size_t count;
 	size_t h,t;
-	
+
 	pthread_spinlock_t lock;
 	sem_t free;
 	sem_t used;
 
 	int fd;
-	size_t fsize;	
-	
+	size_t fsize;
+
 	char name[CBUFFER_MAX_NAME];
 } __attribute__ ((aligned (16))) shm_cbuffer_t;
 

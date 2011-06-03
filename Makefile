@@ -1,25 +1,22 @@
 CC=gcc
-CFLAGS=-g -c
+CFLAGS=-fdata-sections -ffunction-sections -g -c -O3
 RM=rm -rf
 MKDIR=mkdir -p
-MAKEDEPEND=gcc -MM $(CFLAGS) 
-LDFLAGS=-lzmq -ldl -lrt -pthread
-LDFLAGS_lib=-fPIC -shared -lzmq -ldl -lrt -pthread
+MAKEDEPEND=gcc -MM $(CFLAGS)
+LDFLAGS=-lzmq -ldl -lrt -pthread --gc-sections
+LDFLAGS_lib=-fPIC -shared -lzmq -ldl -lrt -pthread --gc-sections
 
 EXE_collect=collector
 EXE_receive=receiver
 LIB_tracelib=libcfstrace.so
 
-SRC_collect=collect.c
-SRC_receive=receiver.c
-SRC_tracelib=cfstrace.c
-SRC=sqlite_adapter.c sqlite3.c shm_mbuffer.c
+SRC_collect=collect.c shm_mbuffer.c
+SRC_receive=receiver.c sqlite3.c sqlite_adapter.c
+SRC_tracelib=cfstrace.c shm_mbuffer.c
 
-OBJECTS=$(SRC:%.c=obj/%.o)
 OBJ_collect=$(SRC_collect:%.c=obj/%.o)
 OBJ_receive=$(SRC_receive:%.c=obj/%.o)
 OBJ_tracelib=$(SRC_tracelib:%.c=obj/%.o)
-
 
 obj/%.d : %.c
 	@set -e; rm -f $@; mkdir -p obj; \
@@ -27,10 +24,8 @@ obj/%.d : %.c
 	sed 's,\($*\)\.o[ :]*,obj/\1.o $@ : ,g' < $@.$$$$ > $@; \
 	rm -f $@.$$$$
 
-all: $(SRC) $(SRC_collect) $(SRC_receive) $(SRC_tracelib) $(EXE_collect) $(EXE_receive) $(LIB_tracelib) Makefile
-#	mkdir -p obj
+all: $(SRC_collect) $(SRC_receive) $(SRC_tracelib) $(EXE_collect) $(EXE_receive) $(LIB_tracelib)
 
--include $(SRC:%.c=obj/%.d)
 -include $(SRC_collect:%.c=obj/%.d)
 -include $(SRC_receive:%.c=obj/%.d)
 -include $(SRC_tracelib:%.c=obj/%.d)

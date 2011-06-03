@@ -44,18 +44,18 @@ void * fd_worker(void *p)
 void * name_worker(void *p)
 {
 	void *sender_s = zmq_socket(context, ZMQ_PUSH);
-	
+
 	zmq_connect(sender_s, cstr);
-	
+
 	while(1) {
 		zmq_msg_t msg;
 
 		mbuffer_key_t read_key;
 		opname_t *operation = (opname_t *)shm_mbuffer_get_read(name_data_storage, &read_key);
-		
+
 		size_t real_size = (uintptr_t)(*operation).name - (uintptr_t)operation;
 		real_size += strlen((*operation).name) + 1;
-		
+
 		zmq_msg_init_data(&msg, operation, real_size, shm_mbuff_put_read_zmq, name_data_storage);
 
 		zmq_send(sender_s, &msg, ZMQ_NOBLOCK);
@@ -69,7 +69,7 @@ void * name_worker(void *p)
 int main(int c, char **p)
 {
 	context = zmq_init(8);
-	
+
 	if(c == 1)
 		sprintf(cstr, "tcp://%s:%d", "localhost", 2307);
 	else if(c == 3)
@@ -82,13 +82,13 @@ int main(int c, char **p)
 	if(shm_mbuffer_create(&fd_data_storage, "/cfsprof_fd", sizeof(opfd_t), 2048) != 0) {
 		return -1;
 	}
-	
+
 	if(shm_mbuffer_create(&name_data_storage, "/cfsprof_name", sizeof(opname_t), 2048) != 0) {
 		return -1;
 	}
 
 	pthread_t tfd;
-	pthread_t tname;	
+	pthread_t tname;
 
 	pthread_create(&tfd, NULL,  fd_worker, (void*) NULL);
 	pthread_create(&tname, NULL, name_worker, (void*) NULL);

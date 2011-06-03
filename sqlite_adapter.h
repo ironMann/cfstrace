@@ -21,9 +21,9 @@ typedef struct sqlite_adapter {
 	int should_commit;
 } sqlite_adapter_t;
 
-sqlite_adapter_t* open_database(const char *db_file_name);
-void              close_database(sqlite_adapter_t *adapter);
-void              insert_data(sqlite_adapter_t *adapter, const char *hostname, void *operation);
+sqlite_adapter_t* sqlite_open_database(const char *db_file_name);
+void              sqlite_close_database(sqlite_adapter_t *adapter);
+void              sqlite_insert_data(sqlite_adapter_t *adapter, const char *hostname, void *operation);
 
 
 #endif

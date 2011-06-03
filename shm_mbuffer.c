@@ -27,9 +27,9 @@
 #define ALIGN_ON 16
 
 // dangerous!!!
-#define MBUFFER_READ_TIMEOUT_MSEC  (uint64_t)60000
-#define MBUFFER_WRITE_TIMEOUT_MSEC (uint64_t)30000
-#define MBUFFER_STALE_CHECK_SEC              1
+#define MBUFFER_READ_TIMEOUT_MSEC  (uint64_t)120000
+#define MBUFFER_WRITE_TIMEOUT_MSEC (uint64_t)120000
+#define MBUFFER_STALE_CHECK_SEC              20
 
 static inline uint64_t timestamp()
 {
@@ -44,10 +44,10 @@ void* stale_op_checker(void *data)
 	int i;
 
 	sleep(MBUFFER_STALE_CHECK_SEC);
-	
+
 	while(1) {
 		const uint64_t ctime = timestamp();
-	
+
 		lock(&(*self).Wlock);
 		lock(&(*self).Rlock);
 
@@ -58,7 +58,7 @@ void* stale_op_checker(void *data)
 				(*self).rstart[i] = 0;
 				(*self).wstart[i] = 0;
 				sem_post(&(*self).Wsem);
-				
+
 				printf("Write stale detected!!! key: %d\n", i);
 			}
 		}
@@ -70,7 +70,7 @@ void* stale_op_checker(void *data)
 				(*self).rstart[i] = 0;
 				(*self).wstart[i] = 0;
 				sem_post(&(*self).Wsem);
-				
+
 				printf("Read stale detected!!! key: %d\n", i);
 			}
 		}
@@ -79,7 +79,7 @@ void* stale_op_checker(void *data)
 		sem_getvalue(&(*self).Wsem, &semval);
 		if(semval > sizeof(int)*8)
 			printf("********ERROR: Wsem on %s has value: %d\n", (*self).name, semval);
-		
+
 		unlock(&(*self).Rlock);
 		unlock(&(*self).Wlock);
 
@@ -121,7 +121,7 @@ static void sharedMemoryMutexInit(pthread_mutex_t * GlobalMutex)
 	else {
 		printf("pthread_mutexattr_setrobust_np Failure.\n");
 	}
-	
+
 	pthread_mutexattr_destroy(&oMutexAttribute);
 }
 
@@ -195,7 +195,7 @@ int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t 
 int shm_mbuffer_open(shm_mbuffer_t **shm_mbuf, const char *name)
 {
 	assert (strlen(name) > 1);
-	
+
 	// open shm
 	int mem = shm_open(name, O_RDWR, S_IRUSR|S_IWUSR);
 	if(mem == -1)
@@ -206,9 +206,9 @@ int shm_mbuffer_open(shm_mbuffer_t **shm_mbuf, const char *name)
    	if (fstat(mem, &file_stat) == -1) {
 		shm_unlink(name);
 		return -2;
-	}	
+	}
     	size_t total_size = file_stat.st_size;
-	
+
 	// map shm to addr space
 	*shm_mbuf = (shm_mbuffer_t*) mmap(0, total_size, PROT_READ|PROT_WRITE, MAP_SHARED, mem, 0);
 	if(*shm_mbuf == MAP_FAILED) {
@@ -222,7 +222,7 @@ int shm_mbuffer_open(shm_mbuffer_t **shm_mbuf, const char *name)
 		shm_unlink(name);
 		return -4;
 	}
-	
+
 	return (int)(**shm_mbuf).size;
 }
 
@@ -231,9 +231,9 @@ void shm_mbuffer_destroy(shm_mbuffer_t *shm_mbuf)
 	char name[MBUFFER_MAX_NAME];
 	int fd = (*shm_mbuf).fd;
 	size_t fsize = (*shm_mbuf).fsize;
-	
+
 	memcpy(name, (*shm_mbuf).name, MBUFFER_MAX_NAME);
-	
+
 	munmap(shm_mbuf, fsize);
 	shm_unlink(name);
 }
@@ -243,35 +243,35 @@ void shm_mbuffer_close(shm_mbuffer_t *shm_mbuf)
 	//char name[MBUFFER_MAX_NAME];
 	//int fd = (*shm_mbuf).fd;
 	size_t fsize = (*shm_mbuf).fsize;
-	
+
 	//memcpy(name, (*shm_mbuf).name, MBUFFER_MAX_NAME);
-	
+
 	munmap(shm_mbuf, fsize);
 }
 #if 0
 void shm_mbuffer_put(shm_mbuffer_t *shm_mbuf, const void *data, size_t size)
 {
-	int pos;	
+	int pos;
 	sem_wait(&(*shm_mbuf).free);
 	lock(&(*shm_mbuf).lock);
 	pos = (*shm_mbuf).h;
 	(*shm_mbuf).h = ((*shm_mbuf).h+1) % (*shm_mbuf).count;
 
 	memcpy(((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+pos*(*shm_mbuf).size, data, size<(*shm_mbuf).size?size:(*shm_mbuf).size);
-	
+
 	unlock(&(*shm_mbuf).lock);
 	sem_post(&(*shm_mbuf).used);
 }
 
 int shm_mbuffer_tryput(shm_mbuffer_t *shm_mbuf, const void *data, size_t size)
 {
-	int pos;	
+	int pos;
 	if(sem_trywait(&(*shm_mbuf).free) != 0)
 		return -1;
 	lock(&(*shm_mbuf).lock);
 	pos = (*shm_mbuf).h;
 	(*shm_mbuf).h = ((*shm_mbuf).h+1) % (*shm_mbuf).count;
-	
+
 	memcpy(((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+pos*(*shm_mbuf).size, data, size<(*shm_mbuf).size?size:(*shm_mbuf).size);
 
 	unlock(&(*shm_mbuf).lock);
@@ -281,15 +281,15 @@ int shm_mbuffer_tryput(shm_mbuffer_t *shm_mbuf, const void *data, size_t size)
 
 void shm_mbuffer_get(shm_mbuffer_t *shm_mbuf, void *data, size_t size)
 {
-	int pos;	
+	int pos;
 	sem_wait(&(*shm_mbuf).used);
-	
+
 	lock(&(*shm_mbuf).lock);
 	pos = (*shm_mbuf).t;
 	(*shm_mbuf).t = ((*shm_mbuf).t+1) % (*shm_mbuf).count;
-	
+
 	memcpy(data, ((void*)shm_mbuf) + (size_t)(*shm_mbuf).mem+pos*(*shm_mbuf).size, size<(*shm_mbuf).size?size:(*shm_mbuf).size);
-	
+
 	unlock(&(*shm_mbuf).lock);
 	sem_post(&(*shm_mbuf).free);
 }
@@ -309,7 +309,7 @@ void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
-	*key = tkey;	
+	*key = tkey;
 	assert(tkey < sizeof(int)*8);
 	return ret;
 }
@@ -318,7 +318,7 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 {
 	void * ret = NULL;
 	assert(shm_mbuf != NULL);
-	
+
 	if(sem_trywait(&(*shm_mbuf).Wsem) != 0) {
 		*key = -1;
 		return NULL;
@@ -331,7 +331,7 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+(uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
-	*key = tkey;	
+	*key = tkey;
 	assert(tkey < sizeof(int)*8);
 	return ret;
 }
@@ -385,7 +385,7 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+ (uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
 	*key = tkey;
 	assert(tkey < sizeof(int)*8);
-	
+
 	return ret;
 }
 
@@ -425,7 +425,7 @@ int main()
 		printX(getffsl(a));
 	}
 
-	
+
 	shm_mbuffer_create(&bb, "/test", sizeof(int), 444);
 	mbuffer_key_t k;
 	do {
