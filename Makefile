@@ -1,17 +1,18 @@
 CC=gcc
-CFLAGS=-fdata-sections -ffunction-sections -g -c -O3
+CFLAGS=-fdata-sections -ffunction-sections -g -c -I/usr/local/include/hiredis/
 RM=rm -rf
 MKDIR=mkdir -p
 MAKEDEPEND=gcc -MM $(CFLAGS)
-LDFLAGS=-lzmq -ldl -lrt -pthread --gc-sections
-LDFLAGS_lib=-fPIC -shared -lzmq -ldl -lrt -pthread --gc-sections
+LDFLAGS=-lzmq -ldl -lrt -pthread --gc-sections -g
+LDFLAGS_receiver=$(LDFLAGS) /usr/local/lib/libhiredis.a
+LDFLAGS_lib=-fPIC -shared -lzmq -ldl -lrt -pthread --gc-sections -g
 
 EXE_collect=collector
 EXE_receive=receiver
 LIB_tracelib=libcfstrace.so
 
 SRC_collect=collect.c shm_mbuffer.c
-SRC_receive=receiver.c sqlite3.c sqlite_adapter.c
+SRC_receive=receiver.c sqlite3.c sqlite_adapter.c redis_adapter.c
 SRC_tracelib=cfstrace.c shm_mbuffer.c
 
 OBJ_collect=$(SRC_collect:%.c=obj/%.o)
@@ -30,18 +31,17 @@ all: $(SRC_collect) $(SRC_receive) $(SRC_tracelib) $(EXE_collect) $(EXE_receive)
 -include $(SRC_receive:%.c=obj/%.d)
 -include $(SRC_tracelib:%.c=obj/%.d)
 
-
 $(EXE_collect): $(OBJECTS) $(OBJ_collect)
-	$(CC) $(LDFLAGS) $(OBJECTS) $(OBJ_collect) -o $@
+	$(CC) -o $@ $(OBJECTS) $(OBJ_collect) $(LDFLAGS)
 
 $(EXE_receive): $(OBJECTS) $(OBJ_receive)
-	$(CC) $(LDFLAGS) $(OBJECTS) $(OBJ_receive) -o $@
+	$(CC) -o $@  $(OBJECTS) $(OBJ_receive) $(LDFLAGS_receiver)
 
 $(LIB_tracelib): $(OBJECTS) $(OBJ_tracelib)
-	$(CC) $(LDFLAGS_lib) $(OBJECTS) $(OBJ_tracelib) -o $@
+	$(CC) -o $@ $(OBJECTS) $(OBJ_tracelib) $(LDFLAGS_lib)
 
 obj/%.o:
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) -o $@ $< $(CFLAGS)
 
 depend:
 	$(CC) -E -MM *.c > depend_all.d

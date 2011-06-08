@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <errno.h>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -13,10 +14,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+
 #include <pthread.h>
 #include <semaphore.h>
-
-#include <zmq.h>
 
 #include "cfstrace.h"
 #include "shm_mbuffer.h"
@@ -64,19 +64,26 @@ static inline void fill_header(op_header_t *op, enum op_type op_type)
 ////////////////////////////////////////////////////////////////////////////////
 
 static int init = 0, in_init = 0;
-static shm_mbuffer_t *fd_data_storage;
-static shm_mbuffer_t *name_data_storage;
+static shm_mbuffer_t *fd_data_storage = NULL;
+static shm_mbuffer_t *name_data_storage = NULL;
 static int gpid =0;
 
 void teardown_profile_lib()
 {
+	//if not used, return
+	if(!init) return;
+	if(in_init) return;
+	if(!fd_data_storage) return;
+	if(!name_data_storage) return;
+	if(!gpid) return;	
+	if(gpid != getpid()) return;
+
 	// put proc end message
 	mbuffer_key_t wkey;
 	opfd_t *operation = (opfd_t *)shm_mbuffer_get_write(fd_data_storage, &wkey);
 	fill_header(&(*operation).header, PROC_CLOSE);
 	shm_mbuffer_put_write(fd_data_storage, wkey);
 
-	//sleep(2);
 	shm_mbuffer_close(fd_data_storage);
 	shm_mbuffer_close(name_data_storage);
 }

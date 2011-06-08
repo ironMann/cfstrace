@@ -3,19 +3,12 @@
 
 #define MBUFFER_MAX_NAME 128
 
-typedef ssize_t mbuffer_key_t;
+typedef uintptr_t mbuffer_key_t;
 
 typedef struct {
-	int Rfield;
-	int Wfield;
-	void *mem;
+	uintptr_t mem;
 	size_t size;
 	size_t count;
-	//locks
-	pthread_mutex_t Rlock;
-	pthread_mutex_t Wlock;
-	sem_t Rsem;
-	sem_t Wsem;
 
 	int fd;
 	size_t fsize;
@@ -23,10 +16,18 @@ typedef struct {
 	char name[MBUFFER_MAX_NAME];
 
 	pthread_t thousekeep;
-	int wpid[sizeof(int)*8];
-	int rpid[sizeof(int)*8];
-	uint64_t wstart[sizeof(int)*8];
-	uint64_t rstart[sizeof(int)*8];
+
+	uintptr_t Wlog;
+	int Hw, Tw;
+	pthread_mutex_t Wlock;
+	sem_t Wsem;
+	uintptr_t Wopstart;
+
+	uintptr_t Rlog;
+	int Hr, Tr;
+	pthread_mutex_t Rlock;
+	sem_t Rsem;
+	uintptr_t Ropstart;
 
 } __attribute__ ((aligned (16))) shm_mbuffer_t;
 
@@ -40,11 +41,9 @@ void shm_mbuffer_destroy(shm_mbuffer_t *shm_cbuf);
 
 void shm_mbuffer_close(shm_mbuffer_t *shm_cbuf);
 
-void shm_mbuffer_put(shm_mbuffer_t *shm_cbuf, const void *data, size_t size);
-
-int shm_mbuffer_tryput(shm_mbuffer_t *shm_cbuf, const void *data, size_t size);
-
-void shm_mbuffer_get(shm_mbuffer_t *shm_cbuf, void *data, size_t size);
+//void shm_mbuffer_put(shm_mbuffer_t *shm_cbuf, const void *data, size_t size);
+//int shm_mbuffer_tryput(shm_mbuffer_t *shm_cbuf, const void *data, size_t size);
+//void shm_mbuffer_get(shm_mbuffer_t *shm_cbuf, void *data, size_t size);
 
 
 void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key);

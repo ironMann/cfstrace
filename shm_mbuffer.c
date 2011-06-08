@@ -11,14 +11,11 @@
 #include <fcntl.h> /* For O_* constants */
 #include <unistd.h>
 
+
 #include <pthread.h>
 #include <semaphore.h>
 
 #include "shm_mbuffer.h"
-
-//#define init_lock(l) do { pthread_spin_init(l, PTHREAD_PROCESS_SHARED); } while(0)
-//#define lock(l)      do { pthread_spin_lock(l); } while(0)
-//#define unlock(l)    do { pthread_spin_unlock(l); } while(0)
 
 #define init_lock(l) do { sharedMemoryMutexInit(l); } while(0)
 #define lock(l)      do { pthread_mutex_lock(l); } while(0)
@@ -27,6 +24,7 @@
 #define ALIGN_ON 16
 
 // dangerous!!!
+#define MBUFFER_STALE_CHECK 1
 #define MBUFFER_READ_TIMEOUT_MSEC  (uint64_t)120000
 #define MBUFFER_WRITE_TIMEOUT_MSEC (uint64_t)120000
 #define MBUFFER_STALE_CHECK_SEC              20
@@ -45,30 +43,36 @@ void* stale_op_checker(void *data)
 
 	sleep(MBUFFER_STALE_CHECK_SEC);
 
-	while(1) {
-		const uint64_t ctime = timestamp();
+	uintptr_t *Wlog =  (uintptr_t *)((uintptr_t)self + (*self).Wlog);
+	uint64_t *Wopstart = (uint64_t *)((uintptr_t)self + (*self).Wopstart);
+	uintptr_t *Rlog =  (uintptr_t *)((uintptr_t)self + (*self).Rlog);
+	uint64_t *Ropstart = (uint64_t *)((uintptr_t)self + (*self).Ropstart);
 
+	while(1) {
+#if MBUFFER_STALE_CHECK
 		lock(&(*self).Wlock);
 		lock(&(*self).Rlock);
 
-		for(i=0; i<sizeof(int)*8; i++) {
-			if(((*self).wstart[i] !=0) && ((ctime - (*self).wstart[i]) > MBUFFER_WRITE_TIMEOUT_MSEC*1000)) {
-				(*self).Wfield |= ((int)1 << (int)i);
-				(*self).Rfield &= ~((int)1 << (int)i);
-				(*self).rstart[i] = 0;
-				(*self).wstart[i] = 0;
+		const uint64_t ctime = timestamp();
+
+		for(i=0; i < (*self).count; i++) {
+			if((Wopstart[i] !=0) && ((ctime - Wopstart[i]) > MBUFFER_WRITE_TIMEOUT_MSEC*1000)) {
+				Wlog[(*self).Tw] = i;
+				(*self).Tw = ((*self).Tw + 1) % (*self).count;
+				Wopstart[i] = 0;
+				Ropstart[i] = 0;
 				sem_post(&(*self).Wsem);
 
 				printf("Write stale detected!!! key: %d\n", i);
 			}
 		}
 
-		for(i=0; i<sizeof(int)*8; i++) {
-			if(((*self).rstart[i] !=0) && ((ctime - (*self).rstart[i]) > MBUFFER_READ_TIMEOUT_MSEC*1000)) {
-				(*self).Wfield |= ((int)1 << (int)i);
-				(*self).Rfield &= ~((int)1 << (int)i);
-				(*self).rstart[i] = 0;
-				(*self).wstart[i] = 0;
+		for(i=0; i < (*self).count; i++) {
+			if((Ropstart[i] !=0) && ((ctime - Ropstart[i]) > MBUFFER_READ_TIMEOUT_MSEC*1000)) {
+				Wlog[(*self).Tw] = i;
+				(*self).Tw = ((*self).Tw + 1) % (*self).count;
+				Wopstart[i] = 0;
+				Ropstart[i] = 0;
 				sem_post(&(*self).Wsem);
 
 				printf("Read stale detected!!! key: %d\n", i);
@@ -77,12 +81,13 @@ void* stale_op_checker(void *data)
 
 		int semval;
 		sem_getvalue(&(*self).Wsem, &semval);
-		if(semval > sizeof(int)*8)
-			printf("********ERROR: Wsem on %s has value: %d\n", (*self).name, semval);
+		//if(semval > (*self).count)
+			printf("********Warning: Wsem on %s has value: %d\n", (*self).name, semval);
 
 		unlock(&(*self).Rlock);
 		unlock(&(*self).Wlock);
 
+#endif
 		sleep(MBUFFER_STALE_CHECK_SEC);
 	};
 
@@ -125,26 +130,26 @@ static void sharedMemoryMutexInit(pthread_mutex_t * GlobalMutex)
 	pthread_mutexattr_destroy(&oMutexAttribute);
 }
 
-inline unsigned int getffsl(int x)
-{
-	return ffs(x);
-}
-
-inline static size_t _align(const size_t size)
+inline static uintptr_t _align(const uintptr_t size)
 {
 	return ((size+ALIGN_ON-1)/ALIGN_ON)*ALIGN_ON;
 }
 
-inline static size_t _align_on(const size_t size, const size_t align)
+inline static uintptr_t _align_on(const uintptr_t size, const size_t align)
 {
 	return ((size+align-1)/align)*align;
 }
 
 int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t obj_size, /*const*/ size_t count)
 {
-	count = sizeof(int)*8; //for now
 	assert( 0 < obj_size );
 	assert( 0 < count );
+
+	uintptr_t data_s = 0;
+	uintptr_t Wlog_s = 0;
+	uintptr_t Rlog_s = 0;
+	uintptr_t Wops_s = 0;
+	uintptr_t Rops_s = 0;
 
 	if(obj_size <= 0 || count <= 0)
 		return -1;
@@ -153,9 +158,33 @@ int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t 
 	// 16-byte alignment for objects
 	// total size multiple of page sizes
 	long ps = sysconf(_SC_PAGESIZE);
-	size_t total_aligned_size = _align(sizeof(shm_mbuffer_t)) + _align(obj_size) * count;
-	total_aligned_size = _align_on(total_aligned_size, ps);
 
+	uintptr_t total_aligned_size = data_s = _align(sizeof(shm_mbuffer_t));
+
+	total_aligned_size += _align(obj_size) * count;
+	Wlog_s = total_aligned_size;
+
+	// aligned, add Wlog space
+	total_aligned_size += _align(sizeof(uintptr_t)*count);
+
+	Wops_s = total_aligned_size;
+
+	// add Wopstart space
+	total_aligned_size += _align(sizeof(uint64_t)*count);
+
+	Rlog_s = total_aligned_size;
+
+	// add Rlog space
+	total_aligned_size += _align(sizeof(uintptr_t)*count);
+
+	Rops_s = total_aligned_size;
+	
+	// add Rpostart space
+	total_aligned_size += _align(sizeof(uint64_t)*count);
+
+	//allign on full page size
+	total_aligned_size = _align_on(total_aligned_size, ps);
+	
 	int mem = shm_open(name, O_CREAT | /*O_EXCL*/O_TRUNC | O_RDWR, S_IRUSR|S_IWUSR);
 	if(mem == -1)
 		return -1;
@@ -173,7 +202,7 @@ int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t 
 
 	// init header
 	memset(*shm_mbuf, 0, sizeof(shm_mbuffer_t));
-	(**shm_mbuf).mem = (void*)_align(sizeof(shm_mbuffer_t));
+	(**shm_mbuf).mem = data_s;
 	(**shm_mbuf).size = _align(obj_size);
 	(**shm_mbuf).count = count;
 	init_lock (&(**shm_mbuf).Rlock);
@@ -182,9 +211,25 @@ int shm_mbuffer_create(shm_mbuffer_t **shm_mbuf, const char *name, const size_t 
 	sem_init(&(**shm_mbuf).Rsem, 1, 0);
 	(**shm_mbuf).fd = mem;
 	(**shm_mbuf).fsize = total_aligned_size;
-	(**shm_mbuf).Rfield = 0x0;
-	(**shm_mbuf).Wfield = ~0x0;
+	(**shm_mbuf).Rlog = Rlog_s;
+	(**shm_mbuf).Wlog = Wlog_s;
+	(**shm_mbuf).Ropstart = Rops_s;
+	(**shm_mbuf).Wopstart = Wops_s;
 	strncpy((**shm_mbuf).name, name, MBUFFER_MAX_NAME-1);
+
+	//init Wlog and zero others
+	uintptr_t buf_s = (uintptr_t)*shm_mbuf;
+
+	memset((void *)(buf_s + (**shm_mbuf).Rlog), 0, sizeof(uintptr_t)*count);
+	memset((void *)(buf_s + (**shm_mbuf).Wlog), 0, sizeof(uintptr_t)*count);
+	memset((void *)(buf_s + (**shm_mbuf).Ropstart), 0, sizeof(uint64_t)*count);
+	memset((void *)(buf_s + (**shm_mbuf).Wopstart), 0, sizeof(uint64_t)*count);
+
+	int i;
+	uintptr_t *wlog = (uintptr_t*)(buf_s + (**shm_mbuf).Wlog);
+	for(i=0; i < count; i++) {
+		wlog[i] = i;
+	}
 
 	pthread_create(&(**shm_mbuf).thousekeep, NULL, stale_op_checker, *shm_mbuf);
 
@@ -300,17 +345,23 @@ void* shm_mbuffer_get_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 	void * ret = NULL;
 	assert(shm_mbuf != NULL);
 
+	uintptr_t *Wlog =  (uintptr_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wlog);
+	uint64_t *Wopstart = (uint64_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wopstart);
+
 	sem_wait(&(*shm_mbuf).Wsem);
 
 	lock(&(*shm_mbuf).Wlock);
-		mbuffer_key_t tkey = getffsl((*shm_mbuf).Wfield) - 1;
-		(*shm_mbuf).Wfield ^= ((int)1 << (int)tkey);
-		(*shm_mbuf).wstart[tkey] = timestamp();
+		mbuffer_key_t tkey = Wlog[(*shm_mbuf).Hw];
+		(*shm_mbuf).Hw = ((*shm_mbuf).Hw+1) % (*shm_mbuf).count;
+
+		assert(tkey < (*shm_mbuf).count);
+		assert(Wopstart[tkey] == 0);
+
+		Wopstart[tkey] = timestamp();
 	unlock(&(*shm_mbuf).Wlock);
 
-	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem+tkey*(*shm_mbuf).size;
+	ret = ((void*)shm_mbuf)+(size_t)(*shm_mbuf).mem + tkey*(*shm_mbuf).size;
 	*key = tkey;
-	assert(tkey < sizeof(int)*8);
 	return ret;
 }
 
@@ -324,15 +375,22 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 		return NULL;
 	}
 
+	uintptr_t *Wlog =  (uintptr_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wlog);
+	uint64_t *Wopstart = (uint64_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wopstart);
+
 	lock(&(*shm_mbuf).Wlock);
-		mbuffer_key_t tkey = getffsl((*shm_mbuf).Wfield) - 1;
-		(*shm_mbuf).Wfield ^= ((int)1 << (int)tkey);
-		(*shm_mbuf).wstart[tkey] = timestamp();
+		mbuffer_key_t tkey = Wlog[(*shm_mbuf).Hw];
+		(*shm_mbuf).Hw = ((*shm_mbuf).Hw+1) % (*shm_mbuf).count;
+
+		assert(tkey < (*shm_mbuf).count);
+		assert(Wopstart[tkey] == 0);
+
+		Wopstart[tkey] = timestamp();
 	unlock(&(*shm_mbuf).Wlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+(uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
 	*key = tkey;
-	assert(tkey < sizeof(int)*8);
+	
 	return ret;
 }
 
@@ -340,51 +398,72 @@ void* shm_mbuffer_tryget_write(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 void shm_mbuffer_put_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
 	assert(shm_mbuf != NULL);
-	assert(key < sizeof(int)*8);
+	assert(key < (*shm_mbuf).count);
+
+	uintptr_t *Rlog =  (uintptr_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Rlog);
+	uint64_t *Wopstart = (uint64_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wopstart);
 
 	lock(&(*shm_mbuf).Rlock);
-		if((*shm_mbuf).wstart[key] == 0) { // not enoguh to detect stale write?!
-			unlock(&(*shm_mbuf).Rlock);
+		if(Wopstart[key] == 0) { // not enoguh to detect stale write?!
 			return;
 		}
-		(*shm_mbuf).Rfield |= ((int)1 << (int)key);
-		(*shm_mbuf).wstart[key] = 0;
+
+		Rlog[(*shm_mbuf).Tr] = key; // check key some more ?
+		(*shm_mbuf).Tr = ((*shm_mbuf).Tr + 1) % (*shm_mbuf).count;
+
+		assert(Wopstart[key] != 0);
+		Wopstart[key] = 0;
 	unlock(&(*shm_mbuf).Rlock);
+
 	sem_post(&(*shm_mbuf).Rsem);
 }
 
 void shm_mbuffer_discard_write(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
 	assert(shm_mbuf != NULL);
-	assert(key < sizeof(int)*8);
+	assert(key < (*shm_mbuf).count);
+
+	uintptr_t *Wlog = (uintptr_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wlog);
+	uint64_t *Wopstart = (uint64_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wopstart);
 
 	lock(&(*shm_mbuf).Wlock);
-		if((*shm_mbuf).wstart[key] == 0) { // not enoguh to detect stale write?!
+		if(Wopstart[key] == 0) { // not enoguh to detect stale write?!
 			unlock(&(*shm_mbuf).Wlock);
 			return;
 		}
-		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
-		(*shm_mbuf).wstart[key] = 0;
+
+		Wlog[(*shm_mbuf).Tw] = key;
+		(*shm_mbuf).Tw = ((*shm_mbuf).Tw + 1) % (*shm_mbuf).count;
+
+		assert(Wopstart[key] != 0);
+		Wopstart[key] = 0;
 	unlock(&(*shm_mbuf).Wlock);
+
 	sem_post(&(*shm_mbuf).Wsem);
 }
 
 void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 {
-	void * ret = NULL;
+	void *ret = NULL;
 	assert(shm_mbuf != NULL);
+
+	uintptr_t *Rlog = (uintptr_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Rlog);
+	uint64_t *Ropstart = (uint64_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Ropstart);
 
 	sem_wait(&(*shm_mbuf).Rsem);
 
 	lock(&(*shm_mbuf).Rlock);
-		mbuffer_key_t tkey = getffsl((*shm_mbuf).Rfield) - 1;
-		(*shm_mbuf).Rfield ^= ((int)1 << (int)tkey);
-		(*shm_mbuf).rstart[tkey] = timestamp();
+		mbuffer_key_t tkey = Rlog[(*shm_mbuf).Hr];
+		(*shm_mbuf).Hr = ((*shm_mbuf).Hr + 1) % (*shm_mbuf).count;
+		
+		assert(tkey < (*shm_mbuf).count);
+		assert(Ropstart[tkey] == 0);
+
+		Ropstart[tkey] = timestamp();	
 	unlock(&(*shm_mbuf).Rlock);
 
 	ret = ((void*)shm_mbuf)+(uintptr_t)(*shm_mbuf).mem+ (uintptr_t)tkey*(uintptr_t)(*shm_mbuf).size;
 	*key = tkey;
-	assert(tkey < sizeof(int)*8);
 
 	return ret;
 }
@@ -392,16 +471,22 @@ void* shm_mbuffer_get_read(shm_mbuffer_t *shm_mbuf, mbuffer_key_t *key)
 void shm_mbuffer_put_read(shm_mbuffer_t *shm_mbuf, const mbuffer_key_t key)
 {
 	assert(shm_mbuf != NULL);
-	assert(key < sizeof(int)*8);
+	assert(key < (*shm_mbuf).count);
+
+	uintptr_t *Wlog = (uintptr_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Wlog);
+	uint64_t *Ropstart = (uint64_t *)((uintptr_t)shm_mbuf + (*shm_mbuf).Ropstart);
 
 	lock(&(*shm_mbuf).Wlock);
-		if((*shm_mbuf).rstart[key] == 0) { // not enoguh to detect stale read?!
+		if(Ropstart[key] == 0) { // not enoguh to detect stale read?
 			unlock(&(*shm_mbuf).Wlock);
 			return;
 		}
-		(*shm_mbuf).Wfield |= ((int)1 << (int)key);
-		(*shm_mbuf).rstart[key] = 0;
+		Wlog[(*shm_mbuf).Tw] = key;
+		(*shm_mbuf).Tw = ((*shm_mbuf).Tw + 1) % (*shm_mbuf).count;	
+		assert(Ropstart[key] != 0);
+		Ropstart[key] = 0;
 	unlock(&(*shm_mbuf).Wlock);
+
 	sem_post(&(*shm_mbuf).Wsem);
 }
 
