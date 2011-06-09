@@ -168,33 +168,69 @@ void redis_insert_data(redis_adapter_t *adapter, const char *hostname, void *dat
 	//
 }
 
+//for sorting
+typedef struct trace_p {
+	int64_t x, y;
+} trace_p_t;
 
-ssize_t redis_get_rhist_json(redis_adapter_t *adapter, char **data)
+static int comp_trace_p(const void *p_a, const void *p_b) {
+	return ( (*(trace_p_t*)p_a).x - (*(trace_p_t*)p_b).x );
+}
+
+static void append_hist_data(redis_adapter_t *adapter, char **data, size_t count, const char* redis_command)
 {
+	int i,j;
 	redisContext *c = (*adapter).db;
 	redisReply *reply = NULL;
-	
-	*data = malloc(10*1024);
-	strcpy(*data, "({ \"data\": [ ");
-	
-	reply = redisCommand(c, G_R_HIST_512);
-	int i;
-	for(i=0; i<reply->elements; i+=2) {
-		char point[64];
-		if(atol(reply->element[i]->str) > 50000) continue;
-		sprintf(point, "[%s, %s]", reply->element[i]->str, reply->element[i+1]->str);
 
-		strcat(*data, point);
-		if((i+2) < reply->elements)
-			strcat(*data, ", ");
+	strcat(*data, "{\"data\":[");
+
+	reply = redisCommand(c, redis_command);
+
+	if(reply->elements > 0) {
+		//realloc if needed
+		if(count < 32*reply->elements)
+			*data = realloc(*data, count + 32*reply->elements);
+
+		//need to sort by x
+		const int no_points = reply->elements/2;
+
+		trace_p_t *points = calloc(no_points, sizeof(trace_p_t));
+
+		for(i=0; i<no_points; i++) {
+			points[i].x = atol(reply->element[i*2]->str);
+			points[i].y = atol(reply->element[i*2+1]->str);
+		}
+
+		qsort(points, no_points, sizeof(trace_p_t), comp_trace_p);
+
+		char point[64];
+		for(i=0; i < no_points; i++) {
+			//if(points[i].x > 10000) continue;
+			sprintf(point, "[%lld,%lld],", points[i].x, points[i].y);
+			strcat(*data, point);
+		}
+		if(points) free(points);
 	}
-	
-	strcat(*data, " ] })");
+
+	strcat(*data, "]}");
 
 	freeReplyObject(reply);
-	
+}
+
+// data is prealocated (malloc) space for reply. If needed, realloc
+// will be called.
+// returns complete len of reply
+ssize_t redis_get_rhist_json(redis_adapter_t *adapter, char **data, size_t count)
+{
+	append_hist_data(adapter, data, count, G_R_HIST_512);
 	return strlen(*data);
 }
 
-ssize_t           redis_get_whist_json(redis_adapter_t *adapter, char **data);
+ssize_t redis_get_whist_json(redis_adapter_t *adapter, char **data, size_t count)
+{
+	append_hist_data(adapter, data, count, G_W_HIST_512);
+	return strlen(*data);
+}
+
 

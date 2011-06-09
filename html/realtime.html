@@ -1,108 +1,146 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd"> 
+
+<style type="text/css">
+body,html {
+	height: 95%;
+	margin: 0px;
+	padding: 0px;
+}
+#container {
+   margin: 1%;
+   padding: 0;
+   width: 95%;
+   height: 70%;
+   background-color: #FFF;
+}
+#placeholderW, #placeholderR {
+   float: left;
+   width: 45.5%;
+   height: 100%;
+   margin: 1% 0 1% 1%;
+   padding: 1%;
+   color: #666;
+}
+#h1 {
+   text-align: center;
+}
+#placeholderW {
+   float: right;
+   margin: 1% 1% 1% 0;
+}
+#graphW, #graphR {
+   float: left;
+   width: 98%;
+   height: 80%;
+   margin: 1% 0 1% 1%;
+   padding: 0%;
+   color: #004;
+}
+#float {
+   float: left;
+   height: 50%;
+}
+.clear {
+   height: 0;
+   font-size: 1px;
+   margin: 0;
+   padding: 0;
+   line-height: 0;
+   clear: both;
+}
+
+</style>
+
 <html> 
  <head> 
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"> 
-    <title>Flot Examples</title> 
-    <!-- <link href="layout.css" rel="stylesheet" type="text/css"> 
-    <!--[if lte IE 8]><script language="javascript" type="text/javascript" src="../excanvas.min.js"></script><![endif]--> 
+    <title>Realtime histograms</title> 
     <script language="javascript" type="text/javascript" src="./js/jquery-1.6.1.min.js"></script> 
     <script language="javascript" type="text/javascript" src="./js/flot/jquery.flot.js"></script> 
  </head> 
     <body> 
-    <h1>Flot Examples</h1> 
- 
-    <div id="placeholder" style="width:600px;height:300px;"></div> 
- 
-    <p>You can update a chart periodically to get a real-time effect
-    by using a timer to insert the new data in the plot and redraw it.</p> 
- 
-    <p>Time between updates: <input id="updateInterval" type="text" value="" style="text-align: right; width:5em"> milliseconds</p> 
+	<div id="container" >
+		<div id="placeholderR">
+			<h1 id="h1">Realtime read histogram</h1>
+			<div id="graphR""></div>
+		</div>
+		<div id="placeholderW">
+			<h1 id="h1">Realtime write histogram</h1>
+			<div id="graphW""></div>
+		</div>
+		
+	</div>
+<div id="float">
 
+	<p>You can update a chart periodically to get a real-time effect
+		by using a timer to insert the new data in the plot and redraw it.
+	</p> 
 
-<script type="text/javascript"> 
+	<p>Time between updates: <input id="updateInterval" type="text" value="" style="text-align: right; width:5em"> milliseconds</p> 
+</div>
+
+<script type="text/javascript">
+
 $(function () {
-    // we use an inline data source in the example, usually data would
-    // be fetched from a serve
-	var d = [];
+	var d_rh = [];
+	var d_wh = [];
+// style="width:600px;height:300px;"<div class="clear"></div>
+	var options = {
+		series: {
+			lines: { show: true, steps: false, fill: true },
+			//points: { show: false },
+			bars: { show: true, fill: true }
+		}
+	};
 
-	// then fetch the data with jQuery
-        
+	function updateWrite(series) {
+		d_wh = [];
+		d_wh.push(series);
 
-	function hist(series) {
-            // extract the first coordinate pair so you can see that
-            // data is now an ordinary Javascript object
-            //var firstcoordinate = '(' + series.data[0][0] + ', ' + series.data[0][1] + ')';
- 		//alert(firstcoordinate);
-            d = [];
-	    d.push(series);
-            
-            // and plot all we got
-            //$.plot($("#placeholder"), [{ d, lines:{show: false}, points: { show: true} }], options);
-       var options = {
-                  series: {
-                  lines: { show: false },
-                  points: { show: true }
-                  }
-                };
-		$.plot($("#placeholder"), d , options);
-         }    
+		$.plot($("#graphW"), d_wh , options);
+	}
 
+	function updateRead(series) {
+		d_rh = [];
+		d_rh.push(series);
 
+		$.plot($("#graphR"), d_rh , options);
+	}
 
-    function getRandomData() {
+	function getData() {
 
-	//var mydata = $.ajax({
- 	//	url: "http://localhost:8765/read_some_more_data",
-  	//	async: false,
-	//	dataType: "jsonp",
- 	//}).responseText
+		$.getJSON(
+			"http://localhost:8765/get_write_hist_json;callback=?",
+			function(data){  updateWrite(data) }
+		);
 
-	//$.ajax({
-         //   url: "http://localhost:8765/read_some_more_data_json?callback=?",
-          //  method: 'GET',
-	//	async: false,
-        //    dataType: 'jsonp'
-        //});
-
-	$.getJSON("http://localhost:8765/read_some_more_data_json;callback=?",
-    		function(data1){  hist(data1) }
-	);
-	
-	
-
-    }
+		$.getJSON(
+			"http://localhost:8765/get_read_hist_json;callback=?",
+			function(data){  updateRead(data) }
+		);
+	}
  
-    // setup control widget
-    var updateInterval = 1000;
-    $("#updateInterval").val(updateInterval).change(function () {
-        var v = $(this).val();
-        if (v && !isNaN(+v)) {
-            updateInterval = +v;
-            if (updateInterval < 1)
-                updateInterval = 1;
-            if (updateInterval > 2000)
-                updateInterval = 2000;
-            $(this).val("" + updateInterval);
-        }
-    });
+	// setup control widget
+	var updateInterval = 2000;
+	$("#updateInterval").val(updateInterval).change(function () {
+		var v = $(this).val();
+		if (v && !isNaN(+v)) {
+			updateInterval = +v;
+			if (updateInterval < 20)
+				updateInterval = 20;
+			if (updateInterval > 5000)
+				updateInterval = 5000;
+			$(this).val("" + updateInterval);
+		}
+	});
  
-    // setup plot
-    var options = {
-        series: { shadowSize: 0 }, // drawing is faster without shadows
-        xaxis: { show: true }
-    };
-    //var plot = $.plot($("#placeholder"),  getRandomData() , options);
- 
-    function update() {
-        //plot.setData( getRandomData() );
-        // since the axes don't change, we don't need to call plot.setupGrid()
-        //plot.draw();
-        
-	getRandomData();
-        setTimeout(update, updateInterval);
-    }
- 
-    update();
+	function update() {
+
+		getData();
+		setTimeout(update, updateInterval);
+	}
+
+	update();
 });
 </script> 
  
